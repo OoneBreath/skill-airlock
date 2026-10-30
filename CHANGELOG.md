@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.2: two false BLOCKs fixed
+
+Reported by the same independent review, while verifying v0.1.1 against real installed skills:
+
+- The known-endpoint rule had no word boundaries, so `toast.promise(…)` read as the `oast.pro`
+  collection domain (and `notpastebin.com` as `pastebin.com`). All endpoints are now bounded on both
+  sides; real URLs such as `https://abc.oast.pro/x` are still HIGH.
+- A zero-width character directly before a ``` fence in a template outside `SKILL.md` (the usual way to
+  show a literal fence inside a fenced block) is now LOW. Anywhere else, zero-width characters stay HIGH.
+- Calibration unchanged: 1 BLOCK (by design), 21 REVIEW, 40 CLEAN/OK on the 62 public skills; 7/7
+  malicious fixtures BLOCK. 26 tests.
+
 ## 0.1.1: audit hardening after an independent review
 
 Three bypasses reported by an independent review are fixed, each with a new test fixture:

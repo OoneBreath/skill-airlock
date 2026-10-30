@@ -21,6 +21,9 @@ SCRIPT_EXT = {".sh", ".bash", ".zsh", ".fish", ".py", ".js", ".mjs", ".cjs", ".t
               ".php", ".ps1", ".psm1", ".bat", ".cmd", ".lua", ".go", ".rs", ".swift"}
 ASSET_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".woff", ".woff2", ".ttf",
              ".otf", ".mp3", ".mp4", ".wav", ".zip", ".gz", ".tgz", ".docx", ".xlsx", ".pptx"}
+# A zero-width character right before a fence is the usual way to show a literal ``` inside a fenced
+# template; outside SKILL.md that exact shape is low, anywhere else zero-width stays high.
+FENCE_ESCAPE = re.compile(r"^(\s*[\u200b\u200c\u200d\u2060\ufeff]+)(```|~~~)")
 BENIGN_DOTFILES = {".gitignore", ".gitkeep", ".gitattributes", ".editorconfig", ".prettierrc"}
 
 ZERO_WIDTH = {0x200B, 0x200C, 0x200D, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0x180E, 0xFEFF}
@@ -50,8 +53,10 @@ LINE_RULES = [
     ("network", MEDIUM, r"\bInvoke-(WebRequest|RestMethod)\b|\bNet\.WebClient\b", "HTTP client"),
     ("raw-ip", MEDIUM, r"https?://(?!127\.0\.0\.1|0\.0\.0\.0)\d{1,3}(\.\d{1,3}){3}", "URL with a raw IP address"),
     ("reverse-shell", HIGH, r"/dev/(tcp|udp)/", "bash network device, typical of reverse shells"),
-    ("exfil-endpoint", HIGH, r"discord(app)?\.com/api/webhooks|hooks\.slack\.com|webhook\.site|requestbin|pipedream\.net|"
-                             r"ngrok(-free)?\.(io|app)|pastebin\.com|transfer\.sh|interact\.sh|oast\.(fun|me|pro|live|site)|burpcollaborator",
+    # Bounded on both sides: "toast.promise" must not read as oast.pro, nor "notpastebin.com" as pastebin.com.
+    ("exfil-endpoint", HIGH, r"(?<![\w-])(discord(app)?\.com/api/webhooks|hooks\.slack\.com|webhook\.site|requestbin|pipedream\.net|"
+                             r"ngrok(-free)?\.(io|app)|pastebin\.com|transfer\.sh|interact\.sh|oast\.(fun|me|pro|live|site)|"
+                             r"burpcollaborator)(?![\w-])",
      "known data-collection or tunnelling endpoint"),
     # secrets
     ("secret-path", MEDIUM, r"(?<![\w-])\.(ssh|aws|gnupg|kube)\b|\bid_(rsa|ed25519|ecdsa|dsa)\b|\.git-credentials|"
@@ -327,8 +332,13 @@ def audit(root):
                 scan = line[:MAX_LINE]
                 zw, bidi, tagged = _hidden_chars(scan)
                 if zw:
-                    add(HIGH, "hidden-unicode", rel, no, scan,
-                        "invisible characters: " + ", ".join(f"U+{c:04X}" for c in zw))
+                    fence = FENCE_ESCAPE.match(scan)
+                    hidden = sum(1 for c in scan if ord(c) in ZERO_WIDTH)
+                    if fence and not is_skill_md and hidden == sum(1 for c in fence.group(1) if ord(c) in ZERO_WIDTH):
+                        add(LOW, "hidden-unicode", rel, no, scan, "zero-width character escaping a code fence (template idiom)")
+                    else:
+                        add(HIGH, "hidden-unicode", rel, no, scan,
+                            "invisible characters: " + ", ".join(f"U+{c:04X}" for c in zw))
                 if bidi:
                     add(HIGH, "bidi-control", rel, no, scan, "bidirectional controls can make text read differently than it runs")
                 if tagged:

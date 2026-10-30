@@ -5,7 +5,7 @@
 Give your agent a task. It finds suitable skills in a local index, audits them in quarantine before
 they touch your machine, asks you, uses them, and lets them go when the job is done.
 
-[![Version](https://img.shields.io/badge/version-0.1.1%20alpha-orange)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.2%20alpha-orange)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Runtime deps](https://img.shields.io/badge/runtime%20deps-zero-success)](#install)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-success)](#privacy)
@@ -147,7 +147,7 @@ Severity depends on context, so documentation doesn't drown out real problems:
 `airlock find` never echoes text aimed at the agent: a description that matches an instruction rule,
 or an invalid frontmatter name, is withheld with a pointer to `airlock inspect`.
 
-**Calibration (v0.1.1):** across all 62 skills in the three public catalogs above: 1 BLOCK, 21 REVIEW
+**Calibration (v0.1.2):** across all 62 skills in the three public catalogs above: 1 BLOCK, 21 REVIEW
 (skills that really configure hooks, settings and MCP servers, call the network, or tell the agent
 to use `sudo`), 40 CLEAN or OK. The one BLOCK is a `SKILL.md` that tells the agent to run the
 Homebrew installer with `curl … | bash`: a real download-and-run instruction, blocked by design, and
