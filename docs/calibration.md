@@ -12,6 +12,7 @@ and `vercel-labs/agent-skills`, mirrored on 30 October 2026 (claude-plugins-offi
 | v0.1.0 (context-aware severity) | 0 | 16 | 46 | 4 / 4 |
 | v0.1.1 (after an independent review) | 1 | 21 | 40 | 7 / 7 |
 | v0.1.2 (two false positives fixed) | 1 | 21 | 40 | 7 / 7 |
+| v0.1.3 (remote instructions rule) | 1 | 23 | 38 | 7 / 7 + 1 REVIEW fixture |
 
 v0.1.0 shipped 5 fixtures: 4 malicious (`exfil`, `hidden`, `obfuscated`, `persistence`) and 1 clean.
 v0.1.1 added 3 malicious ones (`prose-pipe`, `split-exfil`, `name-injection`).
@@ -68,3 +69,15 @@ both look cleaner.
 Two false positives found by the same review on real installed skills: the known-endpoint rule read
 `toast.promise(` as the `oast.pro` domain, and a zero-width character used to escape a code fence in a
 template was treated as hidden text. Both fixed; the corpus numbers did not change.
+
+## v0.1.3
+
+A tester on a second server found a gap the audit couldn't see: `web-design-guidelines` passed as
+CLEAN, yet its SKILL.md tells the agent to fetch the actual review rules from a URL before every run.
+The audited file is clean; the instructions the agent follows arrive later and can change at any time.
+New rule `remote-instructions` (MEDIUM, so REVIEW): SKILL.md tells the agent to fetch something that is
+itself instructions ("fetch the latest rules", "rules from the fetched document", or a URL to a file
+such as `command.md`). Fetching reference material (SDK READMEs, a course catalogue) is `remote-content`,
+LOW. On the 62 skills it flags exactly two, `web-design-guidelines` and `writing-guidelines`; twelve
+reference fetches are LOW. Calibration: 1 BLOCK, 23 REVIEW, 38 CLEAN/OK.
+

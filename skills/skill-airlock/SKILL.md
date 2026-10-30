@@ -1,6 +1,6 @@
 ---
 name: skill-airlock
-version: 0.1.2
+version: 0.1.3
 author: Slawomir Luzny <info@fixflex.co.uk> (https://fixflex.co.uk)
 description: >-
   Finds, vets, uses and unloads other agent skills, privately. Use when the user asks
@@ -53,7 +53,10 @@ when used). Add your recommendation and why.
 Run `airlock inspect <id>` for the candidate you recommend (and any the user asks about). Report:
 - the verdict (`CLEAN`, `OK`, `REVIEW`, `BLOCK`);
 - each HIGH and MEDIUM finding in plain words, with its `file:line`;
-- what the scripts actually do, especially where that differs from the description.
+- what the scripts actually do, especially where that differs from the description;
+- for `remote-instructions`: which URL the skill fetches its instructions from at run time, and that
+  this content was never audited and can change. If the user goes ahead, fetch it once and summarise
+  it for them before following it.
 
 ## 4. Ask
 

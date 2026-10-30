@@ -5,7 +5,7 @@
 Give your agent a task. It finds suitable skills in a local index, audits them in quarantine before
 they touch your machine, asks you, uses them, and lets them go when the job is done.
 
-[![Version](https://img.shields.io/badge/version-0.1.2%20alpha-orange)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.3%20alpha-orange)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Runtime deps](https://img.shields.io/badge/runtime%20deps-zero-success)](#install)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-success)](#privacy)
@@ -129,6 +129,7 @@ a sanitised excerpt.
 | Destruction | `rm -rf ~`, `mkfs`, `dd` to devices, fork bombs |
 | Prompt injection | "ignore previous instructions", "don't tell the user", "don't ask for permission", claims that the user already approved the skill, telling the agent to override Airlock with `--force`, permission-bypass flags, fake system tags, role overrides |
 | Hidden content | zero-width characters, bidirectional controls, Unicode tag characters (decoded and shown), instructions in HTML comments |
+| Remote instructions | `SKILL.md` tells the agent to fetch its rules or instructions from a URL at run time: what the agent will follow was never audited and can change (REVIEW). Fetching reference docs is noted as low |
 | Declared vs actual | scripts use the network or credentials while the description never says so |
 | Hygiene | invalid frontmatter names, symlinks out of the skill, binaries, oversized `SKILL.md`, missing or vague descriptions |
 
@@ -147,9 +148,9 @@ Severity depends on context, so documentation doesn't drown out real problems:
 `airlock find` never echoes text aimed at the agent: a description that matches an instruction rule,
 or an invalid frontmatter name, is withheld with a pointer to `airlock inspect`.
 
-**Calibration (v0.1.2):** across all 62 skills in the three public catalogs above: 1 BLOCK, 21 REVIEW
-(skills that really configure hooks, settings and MCP servers, call the network, or tell the agent
-to use `sudo`), 40 CLEAN or OK. The one BLOCK is a `SKILL.md` that tells the agent to run the
+**Calibration (v0.1.3):** across all 62 skills in the three public catalogs above: 1 BLOCK, 23 REVIEW
+(skills that really configure hooks, settings and MCP servers, call the network, tell the agent to
+use `sudo`, or fetch their instructions at run time), 38 CLEAN or OK. The one BLOCK is a `SKILL.md` that tells the agent to run the
 Homebrew installer with `curl … | bash`: a real download-and-run instruction, blocked by design, and
 yours to override after reading it. All 7 malicious test fixtures are blocked.
 
@@ -248,6 +249,8 @@ time it already knows what to rent.
 
 - **Not a security certificate.** It is a static filter that surfaces evidence for you to judge.
 - **Not a marketplace.** It indexes the sources you choose.
+- **Not a view of the future.** A skill that fetches its instructions at run time is flagged, but
+  what it fetches later is outside the audit.
 - **Not a sandbox (yet).** A skill used in `once` mode still runs with your agent's permissions.
   The audit is there so that you decide before it does.
 

@@ -1,6 +1,6 @@
 {
   "name": "skill-airlock",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Treat agent skills as temporary capabilities, not permanent installations: offline search over catalogs you trust, quarantine and static audit before install, once/temp/keep modes, automatic cleanup, and a context budget for what you keep.",
   "author": {
     "name": "Slawomir Luzny",

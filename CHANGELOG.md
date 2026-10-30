@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.3: skills that fetch their instructions at run time
+
+- New rule `remote-instructions` (MEDIUM): `SKILL.md` tells the agent to fetch its rules or
+  instructions from a URL at run time. The audited copy then isn't what the agent follows, and the
+  remote content can change. Reference material (READMEs, catalogues) is `remote-content`, LOW.
+  Found by testing on a second server: a vendor skill that fetches its review rules passed as CLEAN.
+- `SKILL.md`: on this finding the agent names the URL, says it was never audited, and summarises the
+  fetched content before following it.
+- Calibration on the 62 public skills: 1 BLOCK, 23 REVIEW, 38 CLEAN/OK. 28 tests.
+
 ## 0.1.2: two false BLOCKs fixed
 
 Reported by the same independent review, while verifying v0.1.1 against real installed skills:

@@ -24,6 +24,16 @@ ASSET_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".woff", 
 # A zero-width character right before a fence is the usual way to show a literal ``` inside a fenced
 # template; outside SKILL.md that exact shape is low, anywhere else zero-width stays high.
 FENCE_ESCAPE = re.compile(r"^(\s*[\u200b\u200c\u200d\u2060\ufeff]+)(```|~~~)")
+# SKILL.md that tells the agent to fetch content at run time: the audited copy is then not the whole story.
+REMOTE_URL = re.compile(r"https?://[^\s`'\")<>]+")
+FETCH_VERB = re.compile(r"\b(fetch\w*|download\w*|retriev\w*|pull(s|ed|ing)?|load(s|ed|ing)?|grab\w*|webfetch|curl|wget)\b",
+                        re.IGNORECASE)
+# What is fetched has to BE the instructions: "fetch the latest rules", "rules from the fetched document",
+# or a URL pointing at an instruction file. A course catalogue or an SDK README is reference material.
+_NOUN = r"(guidelines?|rules?|instructions?|prompts?|checklists?|polic(y|ies)|playbooks?)"
+FETCHES_INSTRUCTIONS = re.compile(r"\b(fetch\w*|download\w*|retriev\w*|load\w*|pull\w*|grab\w*|webfetch)\b(\W+\w+){0,4}?\W+" + _NOUN + r"\b|"
+                                  r"\b" + _NOUN + r"\W+(in|from)\W+the\W+fetched\b", re.IGNORECASE)
+INSTRUCTION_FILE = re.compile(r"/(command|skill|agents?|claude|prompts?|rules|guidelines|instructions)[\w-]*\.md\b", re.IGNORECASE)
 BENIGN_DOTFILES = {".gitignore", ".gitkeep", ".gitattributes", ".editorconfig", ".prettierrc"}
 
 ZERO_WIDTH = {0x200B, 0x200C, 0x200D, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0x180E, 0xFEFF}
@@ -258,6 +268,19 @@ def _read_meta(root):
     return meta, body_start, text
 
 
+def _remote_fetches(text):
+    """(line, url, is_instructions) for each URL the SKILL.md tells the agent to fetch (verb within 3 lines)."""
+    lines = text.splitlines()
+    out = []
+    for i, line in enumerate(lines):
+        for m in REMOTE_URL.finditer(line):
+            verb_lines = [l for l in lines[max(0, i - 3):i + 4] if FETCH_VERB.search(l)]
+            if verb_lines:
+                instr = bool(INSTRUCTION_FILE.search(m.group(0))) or any(FETCHES_INSTRUCTIONS.search(l) for l in [line] + verb_lines)
+                out.append((i + 1, m.group(0), instr))
+    return out
+
+
 def _is_script(path, text):
     ext = os.path.splitext(path)[1].lower()
     return ext in SCRIPT_EXT or text.startswith("#!")
@@ -395,6 +418,12 @@ def audit(root):
             add(MEDIUM, "frontmatter", "SKILL.md", 1, "name/description missing", "frontmatter lacks name or description")
         elif len(meta["description"]) < 40:
             add(LOW, "vague-description", "SKILL.md", 1, meta["description"], "description too short to judge what it does")
+        for no, url, is_instructions in _remote_fetches(text):
+            if is_instructions:
+                add(MEDIUM, "remote-instructions", "SKILL.md", no, url,
+                    "tells the agent to fetch its instructions at run time; what it follows was never audited and can change")
+            else:
+                add(LOW, "remote-content", "SKILL.md", no, url, "loads reference material from the network at run time")
         if meta.get("name") and not SAFE_NAME.match(meta["name"]):
             add(MEDIUM, "unsafe-name", "SKILL.md", 1, meta["name"],
                 "frontmatter name is not a valid skill name (may carry text aimed at the agent); cannot be installed")

@@ -15,4 +15,5 @@ mistakes these for real skills. The tests copy them into a temporary catalog and
 | `obfuscated` | CSV statistics | runs base64-encoded code |
 | `prose-pipe` | Markdown helper | tells the agent, in SKILL.md prose, to pipe a download into bash |
 | `split-exfil` | shortcut sync | reads `~/.ssh` in one script and uploads it from another; generic words in the description |
+| `remote-instructions` | style review | fetches its real instructions from a URL at run time (REVIEW, not BLOCK: the audit can't see them) |
 | `name-injection` | PDF tools | puts instructions to the agent (and a fake user approval) in the frontmatter `name` |

@@ -121,6 +121,20 @@ class AuditRules(unittest.TestCase):
         (d / "SKILL.md").write_text((d / "SKILL.md").read_text() + escaped)
         self.assertIn("hidden-unicode", rules(_audit.audit(d), "high"))
 
+    def test_remote_instructions_are_flagged_for_review(self):
+        r = self.audit("remote-instructions")
+        self.assertEqual(r["verdict"], "REVIEW")
+        self.assertIn("remote-instructions", rules(r, "medium"))
+
+    def test_remote_reference_docs_are_low(self):
+        d = self.tmp / "refdocs"
+        shutil.copytree(self.tmp / "clean", d)
+        (d / "SKILL.md").write_text((d / "SKILL.md").read_text()
+                                    + "Use WebFetch to load `https://example.invalid/sdk/README.md` for the API.\n"
+                                    + "- [Best practices](./reference/practices.md): naming guidelines\n")
+        found = {(f["rule"], f["severity"]) for f in _audit.audit(d)["findings"] if f["rule"].startswith("remote")}
+        self.assertEqual(found, {("remote-content", "low")})
+
     def test_symlink_outside_is_high(self):
         d = self.tmp / "linky"
         shutil.copytree(self.tmp / "clean", d)
@@ -172,7 +186,7 @@ class Cli(unittest.TestCase):
 
     def test_full_loop(self):
         out = self.run_cli("sync").stdout
-        self.assertIn("8 skills", out)
+        self.assertIn("9 skills", out)
         out = self.run_cli("find", "align", "markdown", "table").stdout
         self.assertIn("fx/table-formatter", out.splitlines()[0])
         self.assertIn("verdict: CLEAN", self.run_cli("inspect", "table-formatter").stdout)
