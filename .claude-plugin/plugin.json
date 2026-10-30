@@ -1,7 +1,7 @@
 {
   "name": "skill-airlock",
-  "version": "0.0.1",
-  "description": "Find, vet, use and unload agent skills, privately: offline search over catalogs you trust, quarantine and static audit before install, temporary and once-only modes, and a context budget for what you keep.",
+  "version": "0.1.0",
+  "description": "Treat agent skills as temporary capabilities, not permanent installations: offline search over catalogs you trust, quarantine and static audit before install, once/temp/keep modes, automatic cleanup, and a context budget for what you keep.",
   "author": {
     "name": "Slawomir Luzny",
     "email": "info@fixflex.co.uk",
@@ -20,5 +20,6 @@
     "privacy",
     "context",
     "supply-chain"
-  ]
+  ],
+  "hooks": "./hooks/hooks.json"
 }

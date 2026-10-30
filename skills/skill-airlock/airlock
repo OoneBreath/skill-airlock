@@ -1,0 +1,657 @@
+#!/usr/bin/env python3
+"""skill-airlock: find, vet, use and unload agent skills, privately.
+
+Python 3 stdlib (+ git for `sync`). No telemetry: the only network access is
+`sync` fetching the sources listed in ~/.skill-airlock/sources.json.
+"""
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import _audit  # noqa: E402
+
+VERSION = "0.1.0"
+STATE = Path(os.environ.get("AIRLOCK_HOME") or Path.home() / ".skill-airlock")
+AGENTS = {"claude": Path.home() / ".claude" / "skills", "agents": Path.home() / ".agents" / "skills"}
+TRANSCRIPTS = Path.home() / ".claude" / "projects"
+TRUST_BOOST = {"official": 0.5, "vendor": 0.25}
+SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+STOPWORDS = set("a an and or the to of for in on with by from as at is are be use used using when this that it its "
+                "your you user users can will into via any all not do does skill skills".split())
+
+
+class Fail(Exception):
+    pass
+
+
+# ---------- small helpers ----------
+
+def now():
+    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+
+
+def iso(t):
+    return t.isoformat().replace("+00:00", "Z")
+
+
+def parse_iso(s):
+    return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+
+def parse_duration(s):
+    m = re.fullmatch(r"(\d+)([smhdw])", s.strip())
+    if not m:
+        raise Fail(f"bad duration '{s}' (use e.g. 30m, 12h, 7d, 2w)")
+    n = int(m.group(1))
+    return dt.timedelta(**{{"s": "seconds", "m": "minutes", "h": "hours", "d": "days", "w": "weeks"}[m.group(2)]: n})
+
+
+def load_json(path, default):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        return default
+
+
+def save_json(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+    os.replace(tmp, path)
+
+
+def qid(skill_id):
+    return re.sub(r"[^A-Za-z0-9._-]+", "--", skill_id)
+
+
+def tree_hashes(root):
+    """sha256 per file; symlinks are hashed by their target text, never followed."""
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        links = [d for d in dirnames if os.path.islink(os.path.join(dirpath, d))]
+        dirnames[:] = [d for d in dirnames if d != ".git" and d not in links]
+        for name in filenames + links:
+            full = os.path.join(dirpath, name)
+            rel = os.path.relpath(full, root)
+            if os.path.islink(full):
+                out[rel] = "link:" + os.readlink(full)
+            else:
+                h = hashlib.sha256()
+                with open(full, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(65536), b""):
+                        h.update(chunk)
+                out[rel] = h.hexdigest()
+    return dict(sorted(out.items()))
+
+
+def words(text):
+    out = set()
+    for w in re.findall(r"[a-z0-9][a-z0-9+#.-]*", text.lower()):
+        w = w.strip(".-")
+        if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+            w = w[:-1]
+        if w and w not in STOPWORDS:
+            out.add(w)
+    return out
+
+
+def human_age(ts, days):
+    if not ts:
+        return f">{days}d"
+    days = (now() - parse_iso(ts)).days
+    return "today" if days <= 0 else f"{days}d ago"
+
+
+# ---------- sources, sync, index ----------
+
+def load_sources():
+    path = STATE / "sources.json"
+    if not path.exists():
+        STATE.mkdir(parents=True, exist_ok=True)
+        shutil.copy(HERE / "sources.default.json", path)
+    return load_json(path, {}).get("sources", [])
+
+
+def git(*args, cwd=None):
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    r = subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, text=True, timeout=600)
+    if r.returncode:
+        raise Fail(f"git {args[0]} failed: {r.stderr.strip()[:300]}")
+    return r.stdout.strip()
+
+
+def materialize(src):
+    """Return (root, commit, date) for a source, cloning or updating a shallow mirror if needed."""
+    kind = src.get("type", "github")
+    if kind == "path":
+        root = Path(src["path"]).expanduser()
+        if not root.is_dir():
+            raise Fail(f"path not found: {root}")
+        return root, "local", ""
+    url = src["url"] if kind == "git" else f"https://github.com/{src['repo']}.git"
+    mirror = STATE / "mirrors" / qid(src["id"])
+    if (mirror / ".git").is_dir():
+        git("fetch", "--depth", "1", "--quiet", "origin", "HEAD", cwd=mirror)
+        git("reset", "--hard", "--quiet", "FETCH_HEAD", cwd=mirror)
+    else:
+        mirror.parent.mkdir(parents=True, exist_ok=True)
+        git("clone", "--depth", "1", "--quiet", "--no-recurse-submodules", url, str(mirror))
+    return mirror, git("rev-parse", "HEAD", cwd=mirror), git("log", "-1", "--format=%cs", cwd=mirror)
+
+
+def scan_catalog(src, root, commit, date):
+    entries, seen = [], set()
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = sorted(d for d in dirnames if d not in _audit.SKIP_DIRS and d != "fixtures")
+        skill_md = os.path.join(dirpath, "SKILL.md")
+        if "SKILL.md" not in filenames or os.path.islink(skill_md):
+            continue
+        with open(skill_md, encoding="utf-8", errors="replace") as fh:
+            text = fh.read(200_000)
+        meta, body_start = _audit.parse_frontmatter(text)
+        name = (meta.get("name") or os.path.basename(dirpath)).strip()
+        rel = os.path.relpath(dirpath, root)
+        sid = f"{src['id']}/{name}"
+        if sid in seen:
+            sid = f"{src['id']}/{rel.replace(os.sep, '-')}"
+        seen.add(sid)
+        has_scripts = any(os.path.splitext(f)[1].lower() in _audit.SCRIPT_EXT
+                          for _, _, fs in os.walk(dirpath) for f in fs)
+        entries.append({"id": sid, "source": src["id"], "trust": src.get("trust", "community"), "name": name,
+                        "description": meta.get("description", ""), "path": rel, "commit": commit, "date": date,
+                        "has_scripts": has_scripts,
+                        "desc_tokens": _audit.tokens(name + meta.get("description", "")),
+                        "body_tokens": _audit.tokens("\n".join(text.splitlines()[body_start:]))})
+    return entries
+
+
+def cmd_sync(args):
+    sources = load_sources()
+    old = load_json(STATE / "index.json", {"skills": []})["skills"]
+    entries = []
+    for src in sources:
+        if args.only and src["id"] not in args.only:
+            entries += [e for e in old if e["source"] == src["id"]]
+            continue
+        try:
+            root, commit, date = materialize(src)
+            found = scan_catalog(src, root, commit, date)
+            entries += found
+            print(f"  ✓ {src['id']:<28} {len(found):>4} skills   {commit[:10]} {date}")
+        except (Fail, KeyError, subprocess.TimeoutExpired) as e:
+            kept = [x for x in old if x["source"] == src["id"]]
+            entries += kept
+            print(f"  ✗ {src['id']:<28} {e} (kept {len(kept)} from the previous sync)")
+    save_json(STATE / "index.json", {"synced_at": iso(now()), "skills": entries})
+    print(f"Index: {len(entries)} skills from {len(sources)} sources → {STATE / 'index.json'}")
+
+
+def load_index():
+    idx = load_json(STATE / "index.json", None)
+    if not idx or not idx.get("skills"):
+        raise Fail("the index is empty: run `airlock sync` first")
+    return idx["skills"]
+
+
+def cmd_find(args):
+    query = words(" ".join(args.words))
+    if not query:
+        raise Fail("give a few keywords, e.g. `airlock find pdf extract tables`")
+    scored = []
+    for e in load_index():
+        name_w, desc_w = words(e["name"].replace("-", " ")), words(e["description"])
+        score = 0.0
+        for q in query:
+            if q in name_w:
+                score += 4
+            elif any(w.startswith(q) or (len(w) >= 5 and q.startswith(w)) for w in name_w):
+                score += 2.5
+            if q in desc_w:
+                score += 1.5
+            elif len(q) >= 4 and any(w.startswith(q[:5]) for w in desc_w):
+                score += 0.75
+        if score:
+            scored.append((score + TRUST_BOOST.get(e["trust"], 0), e))
+    scored.sort(key=lambda x: (-x[0], x[1]["id"]))
+    top = scored[: args.limit]
+    if args.json:
+        print(json.dumps([dict(e, score=round(s, 2)) for s, e in top], indent=2, ensure_ascii=False))
+        return
+    if not top:
+        print("No matches in the local index. Try other words, or `airlock sync` to refresh.")
+        return
+    for i, (s, e) in enumerate(top, 1):
+        desc = _audit.sanitize(e["description"], 220)
+        print(f"{i:>2}. {e['id']}  [{e['trust']}]  score {s:.1f} · ~{e['desc_tokens']}+{e['body_tokens']} tok"
+              f" · scripts: {'yes' if e['has_scripts'] else 'no'} · {e['date'] or e['commit'][:10]}")
+        print(f"    {desc}")
+
+
+# ---------- resolving skills ----------
+
+def resolve_catalog(ref):
+    """An index entry by id or unique name, or a local directory."""
+    p = Path(ref).expanduser()
+    if (p / "SKILL.md").is_file() or (ref.startswith((".", "/", "~")) and p.is_dir()):
+        p = p.resolve()
+        return {"id": f"local/{p.name}", "source": "local", "trust": "local", "name": p.name, "path": str(p),
+                "commit": "-", "root": p}
+    idx = load_index()
+    hits = [e for e in idx if e["id"] == ref] or [e for e in idx if e["name"] == ref]
+    if not hits:
+        raise Fail(f"'{ref}' is not in the index (try `airlock find`) and is not a skill directory")
+    if len(hits) > 1:
+        raise Fail(f"'{ref}' is ambiguous: " + ", ".join(e["id"] for e in hits))
+    e = dict(hits[0])
+    src = next((s for s in load_sources() if s["id"] == e["source"]), None)
+    if src is None:
+        raise Fail(f"source '{e['source']}' is no longer in sources.json")
+    base = Path(src["path"]).expanduser() if src.get("type") == "path" else STATE / "mirrors" / qid(src["id"])
+    e["root"] = base / e["path"]
+    if not (e["root"] / "SKILL.md").is_file():
+        raise Fail(f"{e['id']} is missing from the mirror: run `airlock sync`")
+    return e
+
+
+def quarantined():
+    out = []
+    for meta in sorted((STATE / "quarantine").glob("*/meta.json")):
+        m = load_json(meta, None)
+        if m:
+            m["qdir"] = meta.parent
+            out.append(m)
+    return out
+
+
+def resolve_quarantine(ref):
+    items = quarantined()
+    hits = [m for m in items if m["id"] == ref] or [m for m in items if m["name"] == ref]
+    if not hits:
+        raise Fail(f"'{ref}' has not been inspected: run `airlock inspect {ref}` first")
+    if len(hits) > 1:
+        raise Fail(f"'{ref}' is ambiguous: " + ", ".join(m["id"] for m in hits))
+    m = hits[0]
+    if tree_hashes(m["qdir"] / "skill") != m["files"]:
+        raise Fail(f"{m['id']} changed in quarantine after it was inspected: run `airlock inspect` again")
+    return m
+
+
+def gate(m, force):
+    if m["verdict"] == "BLOCK" and not force:
+        raise Fail(f"{m['id']} has HIGH audit findings (see `airlock inspect {m['id']}`). "
+                   "Not proceeding. Only the user can decide to override with --force.")
+
+
+# ---------- inspect, audit, use ----------
+
+def cmd_inspect(args):
+    e = resolve_catalog(args.skill)
+    qdir = STATE / "quarantine" / qid(e["id"])
+    if qdir.exists():
+        shutil.rmtree(qdir)
+    shutil.copytree(e["root"], qdir / "skill", symlinks=True, ignore=shutil.ignore_patterns(".git"))
+    report = _audit.audit(qdir / "skill")
+    name = report["name"] or e["name"]
+    meta = {"id": e["id"], "name": name, "source": e["source"], "trust": e["trust"], "commit": e["commit"],
+            "origin": str(e["root"]), "inspected_at": iso(now()), "verdict": report["verdict"],
+            "counts": report["counts"], "files": tree_hashes(qdir / "skill"), "uses": []}
+    save_json(qdir / "meta.json", meta)
+    text = _audit.render(report, title=f"{e['id']} @ {e['commit'][:10]}")
+    (qdir / "audit.txt").write_text(text + "\n", encoding="utf-8")
+    print(text)
+    print(f"\nQuarantined at {qdir / 'skill'} (nothing installed).")
+    if report["verdict"] == "BLOCK":
+        print("Recommendation: do not use. HIGH findings above.")
+    else:
+        print(f"Next: `airlock use {e['id']}` (this task only) or `airlock dock {e['id']} --temp 7d | --keep`.")
+
+
+def installed_dirs():
+    out = []
+    for agent, base in AGENTS.items():
+        if base.is_dir():
+            for d in sorted(base.iterdir()):
+                if (d / "SKILL.md").exists():
+                    out.append((agent, d))
+    return out
+
+
+def cmd_audit(args):
+    targets = []
+    if args.installed:
+        targets += [(f"{agent}:{d.name}", d) for agent, d in installed_dirs()]
+    for ref in args.skills:
+        p = Path(ref).expanduser()
+        targets.append((ref, p) if p.is_dir() else (ref, resolve_catalog(ref)["root"]))
+    if not targets:
+        raise Fail("nothing to audit: give a skill or directory, or --installed")
+    summary = []
+    for label, d in targets:
+        r = _audit.audit(d)
+        summary.append((label, r))
+        if not args.summary:
+            print(_audit.render(r, title=label) + "\n")
+    if len(summary) > 1 or args.summary:
+        print("Summary")
+        for label, r in sorted(summary, key=lambda x: ("BLOCK", "REVIEW", "OK", "CLEAN").index(x[1]["verdict"])):
+            c = r["counts"]
+            print(f"  {r['verdict']:<6} {label:<40} high {c['high']} · medium {c['medium']} · low {c['low']}")
+    if any(r["verdict"] == "BLOCK" for _, r in summary):
+        sys.exit(1)
+
+
+def cmd_use(args):
+    m = resolve_quarantine(args.skill)
+    gate(m, args.force)
+    m["uses"] = (m.get("uses") or [])[-49:] + [iso(now())]
+    save_json(m["qdir"] / "meta.json", {k: v for k, v in m.items() if k != "qdir"})
+    print(f"ONCE: {m['id']} (audit {m['verdict']}). Nothing installed; no future session will load it.")
+    print(f"Read and follow for this task only: {m['qdir'] / 'skill' / 'SKILL.md'}")
+    print(f"Files it refers to are relative to:  {m['qdir'] / 'skill'}")
+
+
+# ---------- dock, vent, list, verify ----------
+
+def load_lock():
+    return load_json(STATE / "lock.json", {"skills": {}})
+
+
+def cmd_dock(args):
+    m = resolve_quarantine(args.skill)
+    gate(m, args.force)
+    name = m["name"]
+    if not SAFE_NAME.match(name):
+        raise Fail(f"refusing to install: unsafe skill name {name!r}")
+    agents = [a.strip() for a in args.agent.split(",") if a.strip()]
+    for a in agents:
+        if a not in AGENTS:
+            raise Fail(f"unknown agent '{a}' (known: {', '.join(AGENTS)})")
+    lock = load_lock()
+    prev = lock["skills"].get(name)
+    if prev and prev["id"] != m["id"]:
+        raise Fail(f"'{name}' is already docked from {prev['id']}: `airlock vent {name}` first")
+    paths = []
+    for a in agents:
+        dest = AGENTS[a] / name
+        if dest.exists() or dest.is_symlink():
+            if not prev or str(dest) not in prev["paths"]:
+                raise Fail(f"{dest} exists and is not managed by airlock; not touching it")
+            _remove(dest, name)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(m["qdir"] / "skill", dest, symlinks=True)
+        paths.append(str(dest))
+    expires = iso(now() + parse_duration(args.temp)) if args.temp else None
+    lock["skills"][name] = {"id": m["id"], "source": m["source"], "commit": m["commit"],
+                            "mode": "temp" if args.temp else "keep", "expires": expires, "agents": agents,
+                            "paths": paths, "docked_at": iso(now()), "verdict": m["verdict"], "files": m["files"]}
+    save_json(STATE / "lock.json", lock)
+    until = f"until {expires}" if expires else "pinned, kept"
+    print(f"DOCKED {name} ({m['id']} @ {m['commit'][:10]}, {until}) → {', '.join(paths)}")
+    print("New sessions will see it. Remove it any time with `airlock vent " + name + "`.")
+
+
+def _remove(path, name):
+    """Delete an installed skill dir, but only directly inside a known agent skills dir."""
+    path = Path(path)
+    parents = {Path(os.path.abspath(p)) for p in AGENTS.values()}
+    if path.name != name or Path(os.path.abspath(path.parent)) not in parents:
+        raise Fail(f"refusing to delete {path}: not an agent skill directory")
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def cmd_vent(args):
+    lock = load_lock()
+    names = list(args.skills)
+    if args.expired:
+        t = now()
+        names += [n for n, e in lock["skills"].items() if e.get("expires") and parse_iso(e["expires"]) <= t]
+    if not names and not args.expired:
+        raise Fail("name skills to vent, or use --expired")
+    vented, changed = [], False
+    for name in dict.fromkeys(names):
+        entry = lock["skills"].pop(name, None)
+        if entry:
+            changed = True
+            for p in entry["paths"]:
+                _remove(p, name)
+        dropped = []
+        if not args.keep_quarantine:
+            for m in quarantined():
+                if name in (m["name"], m["id"]) or (entry and m["id"] == entry["id"]):
+                    shutil.rmtree(m["qdir"])
+                    dropped.append(m["id"])
+        if entry or dropped:
+            vented.append(name)
+            if not args.hook:
+                where = ", ".join(entry["paths"]) if entry else "quarantine only"
+                print(f"VENTED {name} ({where})")
+        elif not args.hook:
+            print(f"  '{name}' is not docked or quarantined; nothing to do")
+    if changed:
+        save_json(STATE / "lock.json", lock)
+    if args.hook and vented:
+        print(f"skill-airlock: removed expired temporary skill(s): {', '.join(vented)}")
+
+
+def cmd_list(args):
+    lock = load_lock()["skills"]
+    print("Docked")
+    if not lock:
+        print("  (none)")
+    for name, e in sorted(lock.items()):
+        until = f"expires {e['expires']}" if e.get("expires") else "kept"
+        print(f"  {name:<28} {e['mode']:<5} {until:<32} {e['verdict']:<6} {e['id']} → {', '.join(e['agents'])}")
+    print("Quarantine")
+    items = quarantined()
+    if not items:
+        print("  (none)")
+    for m in items:
+        used = f"used {len(m.get('uses') or [])}×" if m.get("uses") else "not used"
+        print(f"  {m['id']:<44} {m['verdict']:<6} inspected {m['inspected_at'][:10]} · {used}")
+
+
+def cmd_verify(args):
+    bad = 0
+    lock = load_lock()["skills"]
+    if not lock:
+        print("Nothing docked.")
+    for name, e in sorted(lock.items()):
+        for p in e["paths"]:
+            if not Path(p).is_dir():
+                print(f"  MISSING  {name}  {p}")
+                bad += 1
+                continue
+            now_h = tree_hashes(p)
+            changed = sorted(k for k in set(now_h) | set(e["files"]) if now_h.get(k) != e["files"].get(k))
+            if changed:
+                bad += 1
+                print(f"  CHANGED  {name}  {p}: {', '.join(changed[:8])}{' …' if len(changed) > 8 else ''}")
+            else:
+                print(f"  OK       {name}  {p}")
+    sys.exit(1 if bad else 0)
+
+
+# ---------- budget ----------
+
+def skill_usage(days):
+    """Last use per skill name from local Claude Code transcripts (read locally, never stored)."""
+    last = {}
+    if not TRANSCRIPTS.is_dir():
+        return last
+    cutoff = time.time() - days * 86400
+    for f in TRANSCRIPTS.rglob("*.jsonl"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                continue
+            with open(f, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if '"Skill"' not in line and "<command-name>" not in line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except ValueError:
+                        continue
+                    ts = obj.get("timestamp") or ""
+                    for name in _names_in(obj):
+                        if ts > last.get(name, ""):
+                            last[name] = ts
+        except OSError:
+            continue
+    return last
+
+
+def _names_in(obj):
+    content = (obj.get("message") or {}).get("content")
+    items = content if isinstance(content, list) else [content]
+    for it in items:
+        if isinstance(it, dict) and it.get("type") == "tool_use" and it.get("name") == "Skill":
+            s = (it.get("input") or {}).get("skill")
+            if isinstance(s, str):
+                yield s.split(":")[-1].lstrip("/")
+        text = it.get("text") if isinstance(it, dict) else it
+        if isinstance(text, str):
+            for m in re.finditer(r"<command-name>/?([\w:.-]+)</command-name>", text):
+                yield m.group(1).split(":")[-1]
+
+
+def cmd_budget(args):
+    lock = load_lock()["skills"]
+    usage = skill_usage(args.days)
+    rows = []
+    for agent, d in installed_dirs():
+        with open(d / "SKILL.md", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+        meta, body_start = _audit.parse_frontmatter(text)
+        name = meta.get("name") or d.name
+        rows.append({"agent": agent, "dir": d.name, "name": name, "desc": meta.get("description", ""),
+                     "dt": _audit.tokens(name + meta.get("description", "")),
+                     "bt": _audit.tokens("\n".join(text.splitlines()[body_start:])),
+                     "last": usage.get(name) or usage.get(d.name), "lock": lock.get(d.name)})
+    if not rows:
+        print("No skills installed in " + ", ".join(str(p) for p in AGENTS.values()))
+        return
+    print(f"{'skill':<28} {'agent':<7} {'tok/session':>11} {'on use':>8}  {'last used':<10} airlock")
+    for r in sorted(rows, key=lambda r: -r["dt"]):
+        lk = r["lock"]
+        tag = "-" if not lk else (f"temp → {lk['expires'][:10]}" if lk["mode"] == "temp" else "keep")
+        print(f"{r['name'][:28]:<28} {r['agent']:<7} {r['dt']:>11,} {r['bt']:>8,}  {human_age(r['last'], args.days):<10} {tag}")
+    per_session = sum(r["dt"] for r in rows if r["agent"] == "claude")
+    print(f"\nClaude Code: {sum(1 for r in rows if r['agent'] == 'claude')} skills · ~{per_session:,} tokens in every session"
+          f" for names+descriptions; bodies load only on use.")
+    unused = [r for r in rows if r["agent"] == "claude" and not r["last"]]
+    if unused:
+        cost = sum(r["dt"] for r in unused)
+        print(f"Not used in the last {args.days} days (from local transcripts): "
+              f"{', '.join(r['name'] for r in unused)}  (~{cost:,} tok/session)")
+        managed = [r["dir"] for r in unused if r["lock"]]
+        if managed:
+            print(f"  → `airlock vent {' '.join(managed)}`")
+        if len(managed) < len(unused):
+            print("  Skills not docked by airlock are left alone; remove them by hand if you no longer need them.")
+    pairs = []
+    for i, a in enumerate(rows):
+        for b in rows[i + 1:]:
+            wa, wb = words(a["desc"]), words(b["desc"])
+            if len(wa) >= 5 and len(wb) >= 5 and a["name"] != b["name"]:
+                j = len(wa & wb) / len(wa | wb)
+                if j >= args.overlap:
+                    pairs.append((j, a["name"], b["name"]))
+    if pairs:
+        print("Similar descriptions (may compete to trigger):")
+        for j, a, b in sorted(pairs, reverse=True)[:10]:
+            print(f"  {a} ↔ {b}  ({j:.0%} shared words)")
+    print("Not counted yet: plugin skills and built-in skills.")
+
+
+# ---------- main ----------
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="airlock", description="Find, vet, use and unload agent skills, privately.")
+    p.add_argument("--version", action="version", version=f"skill-airlock {VERSION}")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("sync", help="mirror the catalogs in sources.json and rebuild the local index")
+    s.add_argument("only", nargs="*", help="sync only these source ids")
+    s.set_defaults(fn=cmd_sync)
+
+    s = sub.add_parser("find", help="search the local index (offline; the query is never stored or sent)")
+    s.add_argument("words", nargs="+")
+    s.add_argument("--limit", type=int, default=10)
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_find)
+
+    s = sub.add_parser("inspect", help="copy a skill into quarantine and audit it")
+    s.add_argument("skill", help="index id, unique name, or a local skill directory")
+    s.set_defaults(fn=cmd_inspect)
+
+    s = sub.add_parser("audit", help="audit skills in place (any directory, or everything installed)")
+    s.add_argument("skills", nargs="*")
+    s.add_argument("--installed", action="store_true", help="audit every skill in the agents' skill directories")
+    s.add_argument("--summary", action="store_true", help="one line per skill")
+    s.set_defaults(fn=cmd_audit)
+
+    s = sub.add_parser("use", help="once mode: use a quarantined skill for this task only, install nothing")
+    s.add_argument("skill")
+    s.add_argument("--force", action="store_true", help="override a BLOCK verdict (user decision only)")
+    s.set_defaults(fn=cmd_use)
+
+    s = sub.add_parser("dock", help="install a quarantined skill")
+    s.add_argument("skill")
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--temp", metavar="DURATION", help="temporary install, e.g. 7d; removed by `vent --expired`")
+    g.add_argument("--keep", action="store_true", help="permanent install, pinned to the inspected commit")
+    s.add_argument("--agent", default="claude", help="comma list of: " + ", ".join(AGENTS) + " (default: claude)")
+    s.add_argument("--force", action="store_true", help="override a BLOCK verdict (user decision only)")
+    s.set_defaults(fn=cmd_dock)
+
+    s = sub.add_parser("vent", help="remove docked or quarantined skills")
+    s.add_argument("skills", nargs="*")
+    s.add_argument("--expired", action="store_true", help="remove all expired temporary installs")
+    s.add_argument("--keep-quarantine", action="store_true", help="uninstall but keep the quarantined copy")
+    s.add_argument("--hook", action="store_true", help="quiet mode for a SessionStart hook; never fails")
+    s.set_defaults(fn=cmd_vent)
+
+    s = sub.add_parser("list", help="show docked and quarantined skills")
+    s.set_defaults(fn=cmd_list)
+
+    s = sub.add_parser("verify", help="check docked skills against the hashes recorded at install")
+    s.set_defaults(fn=cmd_verify)
+
+    s = sub.add_parser("budget", help="context cost of installed skills, unused ones, overlaps")
+    s.add_argument("--days", type=int, default=30)
+    s.add_argument("--overlap", type=float, default=0.4, help="shared-word ratio that counts as overlap")
+    s.set_defaults(fn=cmd_budget)
+
+    args = p.parse_args(argv)
+    try:
+        args.fn(args)
+    except Fail as e:
+        if getattr(args, "hook", False):
+            return 0
+        print(f"airlock: {e}", file=sys.stderr)
+        return 2
+    except Exception:
+        if getattr(args, "hook", False):
+            return 0
+        raise
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

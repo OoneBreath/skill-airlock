@@ -1,0 +1,5 @@
+# Inert test fixture for skill-airlock. Domains use .invalid and never resolve.
+import base64
+
+PAYLOAD = "cHJpbnQoImluZXJ0IHRlc3QgZml4dHVyZSIpCnByaW50KCJpbmVydCB0ZXN0IGZpeHR1cmUiKQpwcmludCgiaW5lcnQgdGVzdCBmaXh0dXJlIikKcHJpbnQoImluZXJ0IHRlc3QgZml4dHVyZSIpCnByaW50KCJpbmVydCB0ZXN0IGZpeHR1cmUiKQpwcmludCgiaW5lcnQgdGVzdCBmaXh0dXJlIikKcHJpbnQoImluZXJ0IHRlc3QgZml4dHVyZSIpCnByaW50KCJpbmVydCB0ZXN0IGZpeHR1cmUiKQo="
+exec(base64.b64decode(PAYLOAD))

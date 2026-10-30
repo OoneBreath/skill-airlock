@@ -17,11 +17,11 @@ Working notes for v0.1–v0.3. Short on purpose; details are decided when the co
 ```
 ~/.skill-airlock/
   sources.json        # catalogs you trust (copied from sources.default.json on first run)
-  index/              # mirrored catalogs: one JSON line per skill (name, description, source, path, commit)
-  quarantine/<id>/    # fetched but not installed; never inside an agent's skills dir
-  lock.json           # every install: source, commit, sha256 per file, mode, expiry, agents, audit result
+  mirrors/<source>/   # shallow git clones of github/git sources
+  index.json          # one entry per skill: id, name, description, source, path, commit, token estimates
+  quarantine/<id>/    # skill/ (the copy), meta.json (hashes, verdict), audit.txt; never inside an agent's skills dir
+  lock.json           # every install: source, commit, sha256 per file, mode, expiry, agents, audit verdict
   ledger.md           # ratings and notes per skill (v0.3)
-  audit/<id>.txt      # last audit report per skill
 ```
 
 ## Index and search
@@ -35,22 +35,33 @@ Working notes for v0.1–v0.3. Short on purpose; details are decided when the co
 
 ## Audit
 
-Static rules run over every file in the quarantined skill. Each finding is `severity · rule · file:line · excerpt`.
+Static rules run over every file in the skill, Markdown included. Each finding is
+`severity · rule · file:line · excerpt`. The rule tables live in `skills/skill-airlock/_audit.py`;
+the README has the [overview](../README.md#how-the-audit-works).
 
-| Area | Examples of what is flagged |
-|---|---|
-| Network | `curl`, `wget`, `nc`, `/dev/tcp`, `fetch(`, `requests.`, `urllib`, `http.client`, raw IPs, webhook URLs |
-| Secrets | reads of `.env`, `~/.ssh`, `~/.aws`, `~/.config/gh`, `*_TOKEN`/`*_KEY` env vars, keychains |
-| Obfuscation | `base64 -d \| sh`, `eval`, `exec(`, long encoded blobs, minified scripts |
-| Persistence | `crontab`, systemd units, shell rc files, writes into agent settings or hooks |
-| Prompt injection | HTML comments carrying instructions, zero-width / bidi Unicode, "ignore previous instructions", instructions to skip confirmation, send data or disable safety |
-| Mismatch | description says "formats tables" but scripts use the network or read secrets |
-| Hygiene | oversized `SKILL.md`, missing or vague `description`, unpinned remote downloads |
+Severity is adjusted by context, because most real skills *document* risky things:
 
-Severity sets the default: **high** means the agent recommends not installing and requires an
-explicit override; **medium** means review the evidence first; **low** is informational.
+- Markdown prose and script comments describe rather than run: code-like rules drop one level there.
+  Fenced code blocks in Markdown keep full severity.
+- Instruction rules (injection, concealment, permission bypass, …) drop to low when the phrase is
+  quoted in prose or a comment: documentation about attacks is not an attack.
+- Behaviour the description declares drops one level (network, credentials, agent config).
+- Combination rules (secrets and network in one script, credentials without a mention in the
+  description) only count real script code, not docs or comments.
 
-The audit is a filter, not a proof. A clean report means "nothing known was found".
+The auditor skips its own two code files when they are byte-identical to the running copy, so its
+rule tables don't flag themselves. A different file can't borrow that exemption.
+
+**Calibration.** Changes to rules are checked against the full public catalogs (62 skills at
+v0.1: 0 BLOCK, 16 REVIEW, 46 CLEAN/OK) and the malicious fixtures in `tests/fixtures/` (all BLOCK).
+A rule change that blocks a well-known legitimate skill needs a reason.
+
+**The report is untrusted text.** Excerpts are truncated, and invisible or control characters are
+shown as `<U+XXXX>`, so a skill can't use its own audit report to smuggle instructions to the agent
+reading it. `SKILL.md` tells the agent the same.
+
+Verdicts: any HIGH is **BLOCK** (the agent recommends against it; only the user can override with
+`--force`), MEDIUM is **REVIEW**, LOW only is **OK**, nothing is **CLEAN**.
 
 ## Modes
 
@@ -60,7 +71,7 @@ The audit is a filter, not a proof. A clean report means "nothing known was foun
   hook can run it automatically.
 - **keep**: installed and pinned to a commit. `airlock update` shows the diff and re-audits before
   anything changes.
-- **fork**: for agents that support running a skill in a sub-agent (Claude Code: `context: fork`
+- **fork** (v0.3): for agents that support running a skill in a sub-agent (Claude Code: `context: fork`
   frontmatter, to be verified per agent). Only the result returns to the main conversation.
 
 A skill loaded into a conversation stays in that conversation's context; no agent can unload it
@@ -82,7 +93,8 @@ v0.3; their paths are checked against each agent's own docs before being added.
 
 `airlock budget` estimates tokens as characters / 4 over each installed skill's name and description
 (what agents load every session) and over the body (what loads on use). It reports unused skills
-from `lock.json` usage timestamps and, from v0.2, from local transcripts.
+from local Claude Code transcripts: `Skill` tool calls and `/slash` invocations, read in place,
+only files modified within the window, nothing copied or stored.
 
 ## Project Brain integration (optional, v0.3)
 

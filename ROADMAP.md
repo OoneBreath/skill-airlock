@@ -2,42 +2,44 @@
 
 Ordered by what makes the tool useful soonest. Versions are targets, not promises.
 
-## v0.1: find, vet, use (MVP)
+## v0.1: find, vet, use, vent ✓
 
-The smallest version that does the whole loop safely.
-
-- [ ] `airlock sync`: mirror catalogs from `sources.json` (GitHub repos, shallow, pinned to a commit)
-- [ ] `airlock find <words>`: offline keyword search over the local index; the agent reranks
-- [ ] `airlock inspect <skill>`: fetch into quarantine, record source commit and file hashes, run the
-      static audit with evidence lines (see [design](docs/design.md#audit))
-- [ ] `airlock use <skill>`: `once` mode; prints the path so the agent can read it, installs nothing
-- [ ] `airlock dock <skill> --temp 7d | --keep`: install into the Claude Code and `.agents/` directories
-- [ ] `airlock vent <skill>` / `--expired`: remove a skill, or all expired `temp` installs (also
-      runnable from a SessionStart hook)
-- [ ] `airlock budget`: description token cost of installed skills, plus unused ones
-- [ ] `SKILL.md`: the agent workflow (task → find → present → audit → ask → use → unload)
-- [ ] Tests for the audit rules (malicious fixtures included in `tests/fixtures/`)
+- [x] `airlock sync`: shallow mirrors of `github` / `git` sources, `path` sources indexed in place
+- [x] `airlock find`: offline keyword search over the local index; the agent judges fit
+- [x] `airlock inspect`: quarantine copy, sha256 per file, static audit with evidence
+- [x] `airlock audit`: audit any directory in place, or `--installed` for everything you have
+- [x] `airlock use`: `once` mode, nothing installed
+- [x] `airlock dock --temp | --keep`: install into Claude Code and the shared `~/.agents/skills/`
+- [x] `airlock vent`: remove what Airlock installed; `--expired` from a SessionStart hook
+- [x] `airlock verify`: installed files against the lock
+- [x] `airlock budget`: per-session token cost, unused skills (local transcripts), overlaps
+- [x] Context-aware severity, calibrated on all 62 skills of three public catalogs
+- [x] Tests, including malicious fixtures (exfiltration, hidden instructions, persistence, obfuscation)
 
 ## v0.2: keep it under control
 
-- [ ] `airlock update`: show the diff against the pinned commit, re-audit, ask before applying
+- [ ] `airlock update`: show the diff against the pinned commit and **what the audit says now that it
+      didn't before** (e.g. "new network access in scripts/sync.sh"); ask before applying
 - [ ] Trust list and blocklist (authors, repos, specific commits)
 - [ ] Profiles: a named set of skills per project or kind of work, switched in one command
-- [ ] Overlap detection: skills with similar descriptions that compete to trigger
-- [ ] Usage stats from local agent transcripts (which skills actually fire)
-- [ ] `fork` mode for agents that support running a skill in a sub-agent
+- [ ] Plugin and built-in skills in `budget`
+- [ ] Usage counts per skill in `budget` (not just last use)
 
 ## v0.3: learn from use
 
-- [ ] Ratings ledger: "skill X for task type Y: good / poor, why", optionally mirrored into Project Brain
-- [ ] Gap detection: spot a task you repeat that no skill covers, and offer to draft one
+- [ ] Local ratings ledger: "worked 24×, failed 2×" per skill and task type, no central server;
+      optionally mirrored into Project Brain so the agent knows what to rent next time
+- [ ] Gap detection: a task you repeat that no skill covers, with an offer to draft one
 - [ ] Fork & adapt: a local copy tuned to you, tracking upstream so updates still show a diff
-- [ ] Network-less dry run of bundled scripts in a sandbox, to catch "phone home" behaviour
-- [ ] More agents: Gemini CLI, Cursor, Copilot, OpenCode, …, with one install linked into several
+- [ ] Sandboxed runs of a skill's bundled scripts (no network, read-only outside a work dir).
+      Instructions the agent follows can't be sandboxed this way; scripts can.
+- [ ] More agents: Gemini CLI, Cursor, Copilot, OpenCode, …, after checking each one's docs
+- [ ] `fork` mode for agents that can run a skill in a sub-agent
 
 ## Later / maybe
 
+- Local trust signals next to the audit (source tier, pinned commit, age, your own history).
+  Deliberately no single "trust score": a number hides the evidence the audit is there to show.
 - Session distillation: turn a successful session into a new skill draft
-- Skill chains: plan an ordered set of skills for a larger task
-- Before/after mini-eval on your own sample task before installing
+- Skill chains: an ordered set of skills for a larger task
 - Sync approved skills across your machines via a private git repo
