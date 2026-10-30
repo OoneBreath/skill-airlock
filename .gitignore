@@ -1,0 +1,12 @@
+# Never commit a real Project Brain or private planning notes.
+.project-brain/
+*.private.md
+
+# Local scout state if someone runs it with HOME pointed at the repo.
+.skill-scout/
+
+# Local cruft
+__pycache__/
+.DS_Store
+*.local
+*.log

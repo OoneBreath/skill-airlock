@@ -1,0 +1,24 @@
+{
+  "name": "skill-scout",
+  "version": "0.0.1",
+  "description": "Find, vet, use and unload agent skills, privately: offline search over catalogs you trust, quarantine and static audit before install, temporary and once-only modes, and a context budget for what you keep.",
+  "author": {
+    "name": "Slawomir Luzny",
+    "email": "info@fixflex.co.uk",
+    "url": "https://fixflex.co.uk"
+  },
+  "repository": "https://github.com/OoneBreath/skill-scout",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "agent-skills",
+    "skills",
+    "skill-manager",
+    "security",
+    "audit",
+    "privacy",
+    "context",
+    "supply-chain"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "_comment": "Catalogs Skill Scout mirrors on `scout sync`. Edit your copy in ~/.skill-scout/sources.json. Only these hosts are contacted.",
+  "sources": [
+    { "id": "anthropics-skills", "type": "github", "repo": "anthropics/skills", "trust": "official" },
+    { "id": "claude-plugins-official", "type": "github", "repo": "anthropics/claude-plugins-official", "trust": "official" },
+    { "id": "vercel-agent-skills", "type": "github", "repo": "vercel-labs/agent-skills", "trust": "vendor" }
+  ]
+}
