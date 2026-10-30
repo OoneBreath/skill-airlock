@@ -1,4 +1,4 @@
-# Skill Scout — find, vet, use and unload agent skills
+# Skill Airlock — find, vet, use and unload agent skills
 
 **Give your agent a task. It finds the right skills, checks them before they touch your machine,
 uses them, and cleans up afterwards.**
@@ -11,7 +11,7 @@ uses them, and cleans up afterwards.**
 > **Status: design phase.** This repo currently holds the design and the plan, not working code.
 > See [ROADMAP.md](ROADMAP.md) for what ships in v0.1.
 
-Skill Scout is a skill for AI coding agents (Claude Code, Codex, Gemini CLI, Cursor, Copilot,
+Skill Airlock is a skill for AI coding agents (Claude Code, Codex, Gemini CLI, Cursor, Copilot,
 OpenCode, and anything else that reads `SKILL.md`). It manages *other* skills. You don't search a
 marketplace yourself; you tell the agent what you want done:
 
@@ -41,6 +41,9 @@ quickly". That leaves three problems:
 
 ## The approach
 
+Think of a spacecraft airlock: nothing gets in without passing through the chamber first, and
+what is no longer needed goes back out the same way.
+
 ```
 task ─▶ find (offline) ─▶ quarantine ─▶ audit ─▶ you decide ─▶ use ─▶ unload
                                                      │
@@ -49,8 +52,8 @@ task ─▶ find (offline) ─▶ quarantine ─▶ audit ─▶ you decide ─�
 
 | Step | What happens |
 |---|---|
-| **Find** | `scout sync` mirrors skill catalogs from sources you trust. Search runs locally, and the agent itself ranks candidates by reading their descriptions, so your query never leaves the machine. |
-| **Quarantine** | A candidate is fetched into `~/.skill-scout/quarantine/`, outside every agent's skills directory, so nothing can load it yet. |
+| **Find** | `airlock sync` mirrors skill catalogs from sources you trust. Search runs locally, and the agent itself ranks candidates by reading their descriptions, so your query never leaves the machine. |
+| **Quarantine** | A candidate is fetched into `~/.skill-airlock/quarantine/`, outside every agent's skills directory, so nothing can load it yet. |
 | **Audit** | Static checks with evidence: network calls, secret paths, obfuscation, persistence, hidden or injected instructions in the Markdown, and a mismatch between what the skill *says* it does and what its scripts *actually* do. |
 | **Decide** | You see the findings and choose a mode. Nothing installs without your yes. |
 | **Use** | The skill runs in the mode you picked (below). |
@@ -68,29 +71,29 @@ task ─▶ find (offline) ─▶ quarantine ─▶ audit ─▶ you decide ─�
 ### Context budget
 
 ```
-$ scout budget
+$ airlock budget
 30 skills installed · ~4,200 tokens per session in descriptions
-18 not used in 30 days (~2,500 tokens) → scout archive --unused 30d
+18 not used in 30 days (~2,500 tokens) → airlock vent --unused 30d
 2 overlap: "pdf-tools" ↔ "pdf-extract" (similar descriptions; may trigger unpredictably)
 ```
 
 ## Privacy
 
 - No telemetry, ever. No accounts, no server.
-- Search is local. The only network traffic is `scout sync` / `fetch` talking to the git hosts of
+- Search is local. The only network traffic is `airlock sync` / `inspect` talking to the git hosts of
   sources **you** listed.
-- Usage history and ratings stay in `~/.skill-scout/` on your machine.
+- Usage history and ratings stay in `~/.skill-airlock/` on your machine.
 
 ## Works across agents
 
-`SKILL.md` is a shared format. Skill Scout installs into each agent's own directory
+`SKILL.md` is a shared format. Skill Airlock installs into each agent's own directory
 (`~/.claude/skills/`, `~/.agents/skills/`, `~/.gemini/skills/`, …) and can install the same
 pinned skill into several agents at once.
 
 ## Pairs with Project Brain
 
 Optional: with [Project Brain](https://github.com/OoneBreath/claude-code-project-brain) present,
-Skill Scout records which skill worked for which kind of task and which didn't. The next time a
+Skill Airlock records which skill worked for which kind of task and which didn't. The next time a
 similar task comes up, the agent already knows, without searching.
 
 ## What it is not

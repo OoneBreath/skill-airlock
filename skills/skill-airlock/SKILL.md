@@ -1,5 +1,5 @@
 ---
-name: skill-scout
+name: skill-airlock
 version: 0.0.1
 author: Slawomir Luzny <info@fixflex.co.uk> (https://fixflex.co.uk)
 description: >-
@@ -10,9 +10,9 @@ description: >-
   not using", "how much context do my skills cost", "remove temporary skills").
 ---
 
-# Skill Scout
+# Skill Airlock
 
-> **DRAFT 0.0.1.** The `scout` CLI described here does not exist yet. This file is the target
+> **DRAFT 0.0.1.** The `airlock` CLI described here does not exist yet. This file is the target
 > workflow for v0.1. Do not install it as a working skill.
 
 You manage other skills for the user. The workflow has a fixed order: **find → present → audit →
@@ -20,7 +20,7 @@ ask → use → unload.** Never skip the audit or the question.
 
 ## Hard rules
 
-- Never send the user's task or query to any external service. Search only with `scout find`.
+- Never send the user's task or query to any external service. Search only with `airlock find`.
 - Never install, copy into an agent's skills directory, or run a bundled script before the user
   says yes to a specific skill and mode.
 - A **high** audit finding means you recommend against it. Install only if the user overrides
@@ -30,9 +30,9 @@ ask → use → unload.** Never skip the audit or the question.
 
 ## 1. Find
 
-Turn the task into 2–4 short keyword sets (domain, action, file types). Run `scout find <words>`
+Turn the task into 2–4 short keyword sets (domain, action, file types). Run `airlock find <words>`
 for each. Read the returned descriptions yourself and keep the 3–5 that actually fit the task.
-If `scout find` returns nothing relevant, say so and offer to do the task without a skill, or to
+If `airlock find` returns nothing relevant, say so and offer to do the task without a skill, or to
 draft a new one.
 
 ## 2. Present
@@ -42,7 +42,7 @@ date, size in tokens, and whether it bundles scripts. End with your recommendati
 
 ## 3. Audit
 
-`scout fetch <skill>` then `scout audit <skill>`. Show the findings grouped by severity, with the
+`airlock inspect <skill>` (fetches into quarantine and audits). Show the findings grouped by severity, with the
 `file:line` evidence. Say plainly what the scripts do, not just what the description claims.
 
 ## 4. Ask
@@ -55,17 +55,17 @@ Ask which skill and which mode:
 
 ## 5. Use
 
-`once`: run `scout use <skill>`, read the `SKILL.md` at the printed path and follow it for this
-task. `temp` / `keep` / `fork`: run `scout add <skill> --<mode>`; it becomes available in the next
+`once`: run `airlock use <skill>`, read the `SKILL.md` at the printed path and follow it for this
+task. `temp` / `keep` / `fork`: run `airlock dock <skill> --<mode>`; it becomes available in the next
 session or after a skill reload.
 
 ## 6. Unload and remember
 
-After the task, ask in one line whether the skill helped. Record it with `scout rate <skill>
+After the task, ask in one line whether the skill helped. Record it with `airlock rate <skill>
 good|poor "<task type>: <why>"`. Remind the user about `temp` expiry only if they asked for it.
 
 ## Housekeeping
 
-- "What do my skills cost?": `scout budget`, then summarise and suggest archiving unused ones.
-- Expired temporary installs: `scout gc`.
-- Updates: `scout update <skill>` shows the diff and re-audits. Present both before applying.
+- "What do my skills cost?": `airlock budget`, then summarise and suggest archiving unused ones.
+- Expired temporary installs: `airlock vent --expired`.
+- Updates: `airlock update <skill>` shows the diff and re-audits. Present both before applying.

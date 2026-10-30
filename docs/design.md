@@ -15,7 +15,7 @@ Working notes for v0.1–v0.3. Short on purpose; details are decided when the co
 ## Layout
 
 ```
-~/.skill-scout/
+~/.skill-airlock/
   sources.json        # catalogs you trust (copied from sources.default.json on first run)
   index/              # mirrored catalogs: one JSON line per skill (name, description, source, path, commit)
   quarantine/<id>/    # fetched but not installed; never inside an agent's skills dir
@@ -26,9 +26,9 @@ Working notes for v0.1–v0.3. Short on purpose; details are decided when the co
 
 ## Index and search
 
-- `scout sync` shallow-fetches each source at its default branch, finds every `SKILL.md`, and
+- `airlock sync` shallow-fetches each source at its default branch, finds every `SKILL.md`, and
   stores the frontmatter `name` and `description`, the path and the commit. Nothing else is stored.
-- `scout find` scores entries by keyword overlap with name and description and returns the top ~15.
+- `airlock find` scores entries by keyword overlap with name and description and returns the top ~15.
 - The agent shortlists 3–5 and presents them: what each does, source, last commit date, size in
   tokens, and whether it bundles scripts.
 - Your query is never written to disk and never sent anywhere.
@@ -56,9 +56,9 @@ The audit is a filter, not a proof. A clean report means "nothing known was foun
 
 - **once**: the skill stays in quarantine; the agent reads its `SKILL.md` and follows it for this
   task only. No future session sees it.
-- **temp**: installed with `expires` in `lock.json`. `scout gc` removes expired ones; a SessionStart
+- **temp**: installed with `expires` in `lock.json`. `airlock vent --expired` removes expired ones; a SessionStart
   hook can run it automatically.
-- **keep**: installed and pinned to a commit. `scout update` shows the diff and re-audits before
+- **keep**: installed and pinned to a commit. `airlock update` shows the diff and re-audits before
   anything changes.
 - **fork**: for agents that support running a skill in a sub-agent (Claude Code: `context: fork`
   frontmatter, to be verified per agent). Only the result returns to the main conversation.
@@ -69,7 +69,7 @@ main context in the first place.
 
 ## Integrity
 
-`lock.json` stores sha256 for every installed file. `scout verify` reports any file that changed
+`lock.json` stores sha256 for every installed file. `airlock verify` reports any file that changed
 after install, whether from an upstream update or a local edit.
 
 ## Agents
@@ -80,12 +80,12 @@ v0.3; their paths are checked against each agent's own docs before being added.
 
 ## Context budget
 
-`scout budget` estimates tokens as characters / 4 over each installed skill's name and description
+`airlock budget` estimates tokens as characters / 4 over each installed skill's name and description
 (what agents load every session) and over the body (what loads on use). It reports unused skills
 from `lock.json` usage timestamps and, from v0.2, from local transcripts.
 
 ## Project Brain integration (optional, v0.3)
 
-If `.project-brain/` exists, `scout rate` appends one line to the ledger and can mirror it into the
+If `.project-brain/` exists, `airlock rate` appends one line to the ledger and can mirror it into the
 brain, so the agent can check "what worked last time for this kind of task" before searching.
 There is no hard dependency in either direction.

@@ -2,8 +2,8 @@
 .project-brain/
 *.private.md
 
-# Local scout state if someone runs it with HOME pointed at the repo.
-.skill-scout/
+# Local airlock state if someone runs it with HOME pointed at the repo.
+.skill-airlock/
 
 # Local cruft
 __pycache__/

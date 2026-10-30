@@ -1,4 +1,4 @@
-# Contributing to Skill Scout
+# Contributing to Skill Airlock
 
 The project is in its design phase, so the most useful contributions right now are:
 
