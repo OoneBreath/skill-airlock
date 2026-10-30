@@ -5,7 +5,7 @@
 Give your agent a task. It finds suitable skills in a local index, audits them in quarantine before
 they touch your machine, asks you, uses them, and lets them go when the job is done.
 
-[![Version](https://img.shields.io/badge/version-0.1.0%20alpha-orange)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.1%20alpha-orange)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Runtime deps](https://img.shields.io/badge/runtime%20deps-zero-success)](#install)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-success)](#privacy)
@@ -123,25 +123,39 @@ a sanitised excerpt.
 |---|---|
 | Network | `curl`, `wget`, `nc`, HTTP clients in Python/JS/PowerShell, raw-IP URLs, `/dev/tcp`, known collection endpoints (webhook.site, Discord/Slack webhooks, ngrok, …) |
 | Secrets | `~/.ssh`, `~/.aws`, `.env`, `.netrc`, `.git-credentials`, keychains and browser cookie stores, agent credentials, dumping all environment variables |
-| Exfiltration shape | secrets and network in the same script; credentials touched while the description never mentions them |
+| Exfiltration shape | secrets and network in the same command, the same script, or split across scripts; credentials touched while the description never mentions them |
 | Execution | `curl … \| sh`, decode-and-run (`base64 -d \| sh`, `exec(b64decode(…))`), `eval`/`exec`, long encoded blobs |
 | Persistence | crontab, systemd/launchd, writes to `~/.bashrc` and friends, the agent's own settings, hooks and MCP config, `authorized_keys` |
 | Destruction | `rm -rf ~`, `mkfs`, `dd` to devices, fork bombs |
-| Prompt injection | "ignore previous instructions", "don't tell the user", "don't ask for permission", permission-bypass flags, fake system tags, role overrides |
+| Prompt injection | "ignore previous instructions", "don't tell the user", "don't ask for permission", claims that the user already approved the skill, telling the agent to override Airlock with `--force`, permission-bypass flags, fake system tags, role overrides |
 | Hidden content | zero-width characters, bidirectional controls, Unicode tag characters (decoded and shown), instructions in HTML comments |
 | Declared vs actual | scripts use the network or credentials while the description never says so |
-| Hygiene | symlinks out of the skill, binaries, oversized `SKILL.md`, missing or vague descriptions |
+| Hygiene | invalid frontmatter names, symlinks out of the skill, binaries, oversized `SKILL.md`, missing or vague descriptions |
 
 Severity depends on context, so documentation doesn't drown out real problems:
 
-- In Markdown prose and code comments, code-like matches drop one level: they describe, they don't
-  run. Fenced code blocks keep full severity, because the agent may run them.
-- A quoted mention of an attack phrase ("never write *ignore previous instructions*") is low.
-- Behaviour the description declares (a skill that says it calls an API) drops one level.
+- `SKILL.md` is the agent's instructions, so all of it counts in full, prose included.
+- In other Markdown (reference docs) and in code comments, code-like matches drop one level: they
+  describe, they don't run. Fenced code blocks keep full severity.
+- A quoted mention of an attack phrase ("never write *ignore previous instructions*") is low in
+  reference docs and comments, and medium in `SKILL.md`.
+- Behaviour the description declares (a skill that says it calls an API) drops one level. The
+  vocabulary is narrow on purpose: words like "sync" or "keys" don't count as declaring anything,
+  and nothing excuses secrets plus network.
+- Declared-vs-actual and exfiltration checks look at real script code, not comments.
 
-**Calibration (v0.1):** across all 62 skills in the three public catalogs above, 0 BLOCK, 16 REVIEW
-(skills that really do configure hooks, settings and MCP servers or call the network) and 46
-CLEAN or OK. All 5 malicious test fixtures are BLOCKed.
+`airlock find` never echoes text aimed at the agent: a description that matches an instruction rule,
+or an invalid frontmatter name, is withheld with a pointer to `airlock inspect`.
+
+**Calibration (v0.1.1):** across all 62 skills in the three public catalogs above: 1 BLOCK, 21 REVIEW
+(skills that really configure hooks, settings and MCP servers, call the network, or tell the agent
+to use `sudo`), 40 CLEAN or OK. The one BLOCK is a `SKILL.md` that tells the agent to run the
+Homebrew installer with `curl … | bash`: a real download-and-run instruction, blocked by design, and
+yours to override after reading it. All 7 malicious test fixtures are blocked.
+
+v0.1.1 closed three bypasses found by an independent review: download-and-run in `SKILL.md` prose,
+exfiltration split across two scripts behind generic description words, and instructions to the
+agent hidden in the frontmatter `name`. Each is now a test fixture.
 
 **Limits.** This is a static filter. A clean report means "nothing known was found", not "safe".
 Excerpts are printed as untrusted data, with invisible characters made visible, so the report

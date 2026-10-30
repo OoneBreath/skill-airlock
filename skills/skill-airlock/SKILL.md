@@ -1,6 +1,6 @@
 ---
 name: skill-airlock
-version: 0.1.0
+version: 0.1.1
 author: Slawomir Luzny <info@fixflex.co.uk> (https://fixflex.co.uk)
 description: >-
   Finds, vets, uses and unloads other agent skills, privately. Use when the user asks

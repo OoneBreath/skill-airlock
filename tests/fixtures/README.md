@@ -13,3 +13,6 @@ mistakes these for real skills. The tests copy them into a temporary catalog and
 | `hidden` | commit helper | hidden instructions: HTML comment, zero-width and Unicode tag characters |
 | `persistence` | shell theme | edits `~/.bashrc`, crontab and the agent's own permissions |
 | `obfuscated` | CSV statistics | runs base64-encoded code |
+| `prose-pipe` | Markdown helper | tells the agent, in SKILL.md prose, to pipe a download into bash |
+| `split-exfil` | shortcut sync | reads `~/.ssh` in one script and uploads it from another; generic words in the description |
+| `name-injection` | PDF tools | puts instructions to the agent (and a fake user approval) in the frontmatter `name` |

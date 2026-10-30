@@ -32,7 +32,7 @@ SECRET_RULES = {"secret-path", "dotenv", "env-dump", "credential-store", "agent-
 # Rules about instructions aimed at the agent. A quoted mention ("never write 'ignore previous
 # instructions'") in docs or comments is documentation, not an attack, and drops to low.
 INSTRUCTION_RULES = {"injection", "conceal-from-user", "skip-confirmation", "without-asking", "permission-bypass",
-                     "role-override", "fake-system-tag", "exfil-instruction"}
+                     "role-override", "fake-system-tag", "exfil-instruction", "claims-user-approval", "airlock-override"}
 # Everything else that matches a line is about code that could run. In Markdown prose (outside a
 # fenced block) or in a script comment it is one level less severe: it describes, it doesn't run.
 DOWNGRADE = {HIGH: MEDIUM, MEDIUM: LOW, LOW: LOW}
@@ -56,8 +56,8 @@ LINE_RULES = [
     # secrets
     ("secret-path", MEDIUM, r"(?<![\w-])\.(ssh|aws|gnupg|kube)\b|\bid_(rsa|ed25519|ecdsa|dsa)\b|\.git-credentials|"
                             r"(?<![\w-])\.(netrc|npmrc|pypirc)\b|\.docker/config\.json|\.config/gh/hosts", "path to credentials"),
-    ("dotenv", MEDIUM, r"(?<![\w./-])\.env(?![\w.-])|(?<![\w./-])\.env\.(local|production|prod)\b", ".env file"),
-    ("env-dump", MEDIUM, r"\bprintenv\s*($|[|;>&)])|(?<![\w-])env\s*\||JSON\.stringify\(\s*process\.env\s*\)|"
+    ("dotenv", MEDIUM, r"(?<![\w./\\-])\.env(?![\w.-])|(?<![\w./\\-])\.env\.(local|production|prod)\b", ".env file"),
+    ("env-dump", MEDIUM, r"\bprintenv\s*($|[|;>&)])|(^|[;&|(`]\s*|\$\(\s*)env\s*\||JSON\.stringify\(\s*process\.env\s*\)|"
                          r"json\.dumps?\(\s*(dict\()?\s*os\.environ|print\(\s*(dict\()?\s*os\.environ\s*\)?\s*\)",
      "dumps all environment variables"),
     ("credential-store", HIGH, r"\bsecurity\s+find-(generic|internet)-password\b|Login Data|Cookies\.binarycookies|"
@@ -89,7 +89,7 @@ LINE_RULES = [
     ("ssh-authorized-keys", HIGH, r"authorized_keys", "can grant remote SSH access"),
     ("privilege", MEDIUM, r"(?<![\w-])sudo\s", "asks for root"),
     ("destructive", HIGH, r"\brm\s+-[a-zA-Z]*[rR][a-zA-Z]*\s+(-[a-zA-Z]+\s+)*['\"]?(/|~|\$HOME|\$\{HOME\})['\"]?(\s|$|/\*)|"
-                          r"(^|[;&|(]\s*|\$\(\s*|`)(sudo\s+)?(mkfs(\.\w+)?|dd\s+if=\S+\s+of=/dev/)\b|:\(\)\s*\{\s*:\|:&\s*\};:", "can destroy data"),
+                          r"(^|[;&|(]\s*|\$\(\s*|`)(sudo\s+)?(mkfs(\.\w+)?\s+(-\S+\s+)*/dev/|dd\s+if=\S+\s+of=/dev/)|:\(\)\s*\{\s*:\|:&\s*\};:", "can destroy data"),
     ("runtime-install", LOW, r"\b(pip3?|npm|pnpm|yarn|gem|cargo)\s+(install|add|i)\b|\bgo\s+(install|get)\b|\bnpx\s+(-y\s+)?[@\w]",
      "installs packages at runtime"),
     # instructions aimed at the agent
@@ -101,7 +101,16 @@ LINE_RULES = [
                                 r"\bwithout\s+the\s+user\s+(knowing|noticing)\b", "tells the agent to hide something from you"),
     ("skip-confirmation", HIGH, r"\b(do\s+not|don'?t|never|no\s+need\s+to)\s+ask\s+(the\s+user\s+)?(for\s+)?(permission|confirmation|approval|consent)\b",
      "tells the agent not to ask you"),
-    ("without-asking", MEDIUM, r"\b(run|proceed|execute|install|delete|remove|send|upload|continue|apply|push|commit|overwrite|"
+    ("claims-user-approval", HIGH, r"\b(this\s+skill|the\s+skill|it|installation|installing\s+it|everything)\s+(is|has\s+been|was)\s+"
+                                   r"(already\s+)?(pre-?approved|approved|authori[sz]ed)\b|\b(pre-?approved|authori[sz]ed)\s+by\s+the\s+user\b|"
+                                   r"\b(the\s+)?user\s+(has\s+)?(already\s+)?(pre-?approved|approved|authori[sz]ed|consented\s+to|"
+                                   r"agreed\s+to)\s+(this|it|the\s+install|installing|running)\b|"
+                                   r"\bno\s+(need\s+for|further)\s+(user\s+)?(approval|consent|confirmation)\b",
+     "claims consent the user never gave"),
+    ("airlock-override", HIGH, r"\b(airlock|dock|vent)\b[^\n]{0,80}--force\b|--force\b[^\n]{0,80}\b(airlock|dock)\b",
+     "tells the agent to override skill-airlock's own checks"),
+    ("without-asking", MEDIUM, r"\b(run|proceed|execute|install|delete|remove|send|upload|continue|apply|push|commit|overwrite|dock|use|"
+                               r"enable|download|fetch|modify|write|edit|change|grant|approve|accept|allow|start|launch|"
                                r"do\s+(it|this|so))\b[^.\n]{0,60}\bwithout\s+(asking|confirmation|confirming|approval|permission)\b|"
                                r"^\W*without\s+(asking|confirmation|confirming)\b", "tells the agent to act without asking"),
     ("permission-bypass", HIGH, r"dangerously-?skip-?permissions|dangerouslyDisableSandbox|bypassPermissions|--yolo\b|auto-?approve\s+all",
@@ -114,17 +123,18 @@ LINE_RULES = [
                                   r"credentials?|passwords?|secrets?|\.env\b|ssh\s+keys?|private\s+keys?|cookies|environment\s+variables)\b",
      "talks about sending secrets somewhere"),
 ]
-COMPILED = [(r, s, re.compile(p, re.IGNORECASE if r in {"injection", "conceal-from-user", "skip-confirmation", "without-asking",
-                                                         "role-override", "exfil-instruction", "fake-system-tag"} else 0), n)
-            for r, s, p, n in LINE_RULES]
+COMPILED = [(r, s, re.compile(p, re.IGNORECASE if r in INSTRUCTION_RULES else 0), n) for r, s, p, n in LINE_RULES]
+SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
-NET_WORDS = re.compile(r"\b(api|apis|http|https|web|website|url|urls|download|upload|fetch|online|internet|cloud|remote|server|"
-                       r"sync|github|gitlab|slack|discord|email|e-mail|send|post|webhook|deploy|search|browse|browser|scrape|crawl|"
-                       r"service|endpoint|request|network|connect)s?\b", re.IGNORECASE)
+# Kept narrow on purpose: generic words ("sync", "keys", "server") must not excuse network or credential use.
+NET_WORDS = re.compile(r"\b(api|apis|http|https|web|website|url|urls|download|upload|fetch|online|internet|cloud|remote|"
+                       r"github|gitlab|slack|discord|email|e-mail|webhook|deploy|browse|browser|scrape|crawl|endpoint|"
+                       r"network)s?\b", re.IGNORECASE)
 CONFIG_WORDS = re.compile(r"\b(hooks?|settings|config|configure|configuration|plugins?|mcp|claude\s+code|agents?|subagents?|"
                           r"automations?|permissions?|skills?)\b", re.IGNORECASE)
-SECRET_WORDS = re.compile(r"\b(credentials?|keys?|tokens?|secrets?|auth|authentication|login|ssh|passwords?|env|environment|"
-                          r"keychain|vault)\b", re.IGNORECASE)
+SECRET_WORDS = re.compile(r"\b(credentials?|(access|api|auth|bearer|github|oauth)\s+tokens?|secrets?|auth|oauth|authentication|"
+                          r"ssh|passwords?|keychain|vault|"
+                          r"api[\s_-]?keys?|private\s+keys?|dotenv)\b|\.env\b", re.IGNORECASE)
 
 
 def parse_frontmatter(text):
@@ -206,6 +216,11 @@ def _self_hashes():
     return _SELF
 
 
+def instruction_hits(text):
+    """Instruction rules that match a piece of catalog text (name or description)."""
+    return sorted({r for r, _, rx, _ in COMPILED if r in INSTRUCTION_RULES and rx.search(text)})
+
+
 def _quoted(line, start):
     """True when a match sits inside backticks or right after an opening quote."""
     before = line[:start]
@@ -251,6 +266,7 @@ def audit(root):
     counts_per_rule = {}
     meta, body_start, skill_text = _read_meta(root)
     desc = (meta or {}).get("description", "")
+    rules_by_file = {}
 
     def add(sev, rule, rel, line, excerpt, note):
         key = (rule, rel)
@@ -303,6 +319,7 @@ def audit(root):
                 scripts.append(rel)
             file_rules = {}
             is_md = ext in (".md", ".markdown")
+            is_skill_md = rel == "SKILL.md"
             in_fence = False
             for no, line in enumerate(text.splitlines(), 1):
                 if no == 1 and line.startswith("\ufeff"):
@@ -319,21 +336,29 @@ def audit(root):
                 if is_md and scan.lstrip().startswith(("```", "~~~")):
                     in_fence = not in_fence
                     continue
-                descriptive = (is_md and not in_fence) or (not is_md and _is_comment(scan))
+                # SKILL.md is the agent's instructions, prose included. Other Markdown is reference
+                # material: outside fenced blocks it describes rather than instructs.
+                descriptive = (is_md and not in_fence and not is_skill_md) or (not is_md and _is_comment(scan))
+                line_rules = set()
                 for rule, sev, rx, note in COMPILED:
                     m = rx.search(scan)
                     if not m:
                         continue
                     if rule in INSTRUCTION_RULES:
-                        if descriptive and _quoted(scan, m.start()):
-                            sev, note = LOW, note + " (quoted mention)"
+                        if _quoted(scan, m.start()) and (descriptive or is_skill_md):
+                            sev = LOW if descriptive else (MEDIUM if sev == HIGH else sev)
+                            note += " (quoted mention)"
                     elif descriptive:
                         sev = DOWNGRADE[sev]
                     if _declared(rule, desc):
                         sev, note = DOWNGRADE[sev], note + " (declared in the description)"
                     add(sev, rule, rel, no, scan, note)
+                    if not descriptive:
+                        line_rules.add(rule)
                     if is_script and not _is_comment(scan):
                         file_rules.setdefault(rule, no)
+                if line_rules & NETWORK_RULES and line_rules & SECRET_RULES:
+                    add(HIGH, "exfil-pattern", rel, no, scan, "reads secrets and sends them in the same command")
             if ext in (".md", ".markdown"):
                 for m in re.finditer(r"<!--(.*?)-->", text, re.S):
                     body = " ".join(m.group(1).split())
@@ -341,6 +366,8 @@ def audit(root):
                         loud = any(rx.search(body) for _, _, rx, _ in COMPILED)
                         add(MEDIUM if loud else LOW, "html-comment", rel, text.count("\n", 0, m.start()) + 1, body,
                             "HTML comment: invisible when rendered, read by the agent")
+            if file_rules:
+                rules_by_file[rel] = file_rules
             net = [r for r in file_rules if r in NETWORK_RULES]
             sec = [r for r in file_rules if r in SECRET_RULES]
             if net and sec:
@@ -358,26 +385,35 @@ def audit(root):
             add(MEDIUM, "frontmatter", "SKILL.md", 1, "name/description missing", "frontmatter lacks name or description")
         elif len(meta["description"]) < 40:
             add(LOW, "vague-description", "SKILL.md", 1, meta["description"], "description too short to judge what it does")
+        if meta.get("name") and not SAFE_NAME.match(meta["name"]):
+            add(MEDIUM, "unsafe-name", "SKILL.md", 1, meta["name"],
+                "frontmatter name is not a valid skill name (may carry text aimed at the agent); cannot be installed")
         if text.count("\n") > 500:
             add(LOW, "oversized", "SKILL.md", 0, f"{text.count(chr(10))} lines", "SKILL.md over 500 lines; costs context on every use")
 
-    by_rule = {}
-    for f in findings:
-        by_rule.setdefault(f["rule"], []).append(f)
-    script_net = [f for r in NETWORK_RULES for f in by_rule.get(r, []) if f["file"] in scripts]
-    if script_net and not NET_WORDS.search(desc):
-        f = script_net[0]
-        add(MEDIUM, "mismatch-network", f["file"], f["line"], desc or "(no description)",
+    sec_files = sorted(f for f, rs in rules_by_file.items() if set(rs) & SECRET_RULES)
+    net_files = sorted(f for f, rs in rules_by_file.items() if set(rs) & NETWORK_RULES)
+    if sec_files and net_files and not set(sec_files) & set(net_files):
+        # Split across scripts so no single file looks like exfiltration. Declared words don't excuse this.
+        first = min(rules_by_file[sec_files[0]][r] for r in rules_by_file[sec_files[0]] if r in SECRET_RULES)
+        add(HIGH, "exfil-pattern", sec_files[0], first, f"secrets in {', '.join(sec_files)}; network in {', '.join(net_files)}",
+            "reads secrets in one script and uses the network in another")
+    # Declared-vs-actual checks look at real script code only: comments and docs don't run.
+    def first_hit(files, ruleset):
+        f = files[0]
+        return f, min(rules_by_file[f][r] for r in rules_by_file[f] if r in ruleset)
+
+    if net_files and not NET_WORDS.search(desc):
+        f, line = first_hit(net_files, NETWORK_RULES)
+        add(MEDIUM, "mismatch-network", f, line, desc or "(no description)",
             "scripts use the network but the description never says so")
-    secret_hits = [f for r in SECRET_RULES for f in by_rule.get(r, []) if f["file"] in scripts]
-    if secret_hits and not SECRET_WORDS.search(desc):
-        f = secret_hits[0]
+    if sec_files and not SECRET_WORDS.search(desc):
+        f, line = first_hit(sec_files, SECRET_RULES)
         # Without a network channel in the scripts, touching a secret path is often protective
         # (a hook that blocks writes to .env); with one, it is the exfiltration shape.
-        sev = HIGH if script_net else MEDIUM
-        add(sev, "mismatch-secrets", f["file"], f["line"], desc or "(no description)",
+        add(HIGH if net_files else MEDIUM, "mismatch-secrets", f, line, desc or "(no description)",
             "touches credentials but the description never mentions them"
-            + ("" if script_net else " (no network use found in scripts)"))
+            + ("" if net_files else " (no network use found in scripts)"))
 
     findings.sort(key=lambda f: (SEVERITIES.index(f["severity"]), f["file"], f["line"]))
     counts = {s: sum(1 for f in findings if f["severity"] == s) for s in SEVERITIES}

@@ -41,19 +41,26 @@ the README has the [overview](../README.md#how-the-audit-works).
 
 Severity is adjusted by context, because most real skills *document* risky things:
 
-- Markdown prose and script comments describe rather than run: code-like rules drop one level there.
-  Fenced code blocks in Markdown keep full severity.
-- Instruction rules (injection, concealment, permission bypass, …) drop to low when the phrase is
-  quoted in prose or a comment: documentation about attacks is not an attack.
-- Behaviour the description declares drops one level (network, credentials, agent config).
-- Combination rules (secrets and network in one script, credentials without a mention in the
-  description) only count real script code, not docs or comments.
+- `SKILL.md` is instructions: every line counts in full, prose included (v0.1.1; v0.1.0 treated its
+  prose as documentation, which let `curl … | bash` in a sentence through as REVIEW).
+- Other Markdown prose and script comments describe rather than run: code-like rules drop one level
+  there. Fenced code blocks keep full severity.
+- Instruction rules (injection, concealment, claimed user approval, `--force` overrides, …) drop to
+  low when the phrase is quoted in reference docs or comments, and to medium when quoted in `SKILL.md`.
+- Behaviour the description declares drops one level (network, credentials, agent config). The word
+  lists are narrow: generic words ("sync", "keys", "server", "tokens" in the LLM sense) don't count.
+- Exfiltration: secrets and network on one line (any file except reference prose), in one script, or
+  split across scripts. Declared words never lower it.
+- Declared-vs-actual checks (`mismatch-*`) and exfiltration only count real script code, not comments.
+- Frontmatter `name` must be a valid skill name. Otherwise it is a finding, `find` shows a safe slug
+  instead, and `dock` refuses it. `find` withholds descriptions that match instruction rules.
 
 The auditor skips its own two code files when they are byte-identical to the running copy, so its
 rule tables don't flag themselves. A different file can't borrow that exemption.
 
-**Calibration.** Changes to rules are checked against the full public catalogs (62 skills at
-v0.1: 0 BLOCK, 16 REVIEW, 46 CLEAN/OK) and the malicious fixtures in `tests/fixtures/` (all BLOCK).
+**Calibration.** Changes to rules are checked against the full public catalogs and the malicious
+fixtures in `tests/fixtures/` (all must BLOCK). v0.1.0: 0 BLOCK, 16 REVIEW, 46 CLEAN/OK, 5 fixtures.
+v0.1.1: 1 BLOCK (Homebrew `curl | bash` in a SKILL.md, by design), 21 REVIEW, 40 CLEAN/OK, 7 fixtures.
 A rule change that blocks a well-known legitimate skill needs a reason.
 
 **The report is untrusted text.** Excerpts are truncated, and invisible or control characters are

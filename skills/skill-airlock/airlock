@@ -20,12 +20,13 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import _audit  # noqa: E402
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 STATE = Path(os.environ.get("AIRLOCK_HOME") or Path.home() / ".skill-airlock")
 AGENTS = {"claude": Path.home() / ".claude" / "skills", "agents": Path.home() / ".agents" / "skills"}
 TRANSCRIPTS = Path.home() / ".claude" / "projects"
 TRUST_BOOST = {"official": 0.5, "vendor": 0.25}
-SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+SAFE_NAME = _audit.SAFE_NAME
+clean = _audit.sanitize
 STOPWORDS = set("a an and or the to of for in on with by from as at is are be use used using when this that it its "
                 "your you user users can will into via any all not do does skill skills".split())
 
@@ -162,7 +163,9 @@ def scan_catalog(src, root, commit, date):
         with open(skill_md, encoding="utf-8", errors="replace") as fh:
             text = fh.read(200_000)
         meta, body_start = _audit.parse_frontmatter(text)
-        name = (meta.get("name") or os.path.basename(dirpath)).strip()
+        raw_name = (meta.get("name") or os.path.basename(dirpath)).strip()
+        name_ok = bool(SAFE_NAME.match(raw_name))
+        name = raw_name if name_ok else qid(os.path.basename(dirpath))[:64]
         rel = os.path.relpath(dirpath, root)
         sid = f"{src['id']}/{name}"
         if sid in seen:
@@ -170,9 +173,13 @@ def scan_catalog(src, root, commit, date):
         seen.add(sid)
         has_scripts = any(os.path.splitext(f)[1].lower() in _audit.SCRIPT_EXT
                           for _, _, fs in os.walk(dirpath) for f in fs)
+        desc = meta.get("description", "")
+        flags = _audit.instruction_hits(raw_name + "\n" + desc)
+        if not name_ok:
+            flags.append("unsafe-name")
         entries.append({"id": sid, "source": src["id"], "trust": src.get("trust", "community"), "name": name,
-                        "description": meta.get("description", ""), "path": rel, "commit": commit, "date": date,
-                        "has_scripts": has_scripts,
+                        "description": desc, "path": rel, "commit": commit, "date": date,
+                        "has_scripts": has_scripts, "flags": flags,
                         "desc_tokens": _audit.tokens(name + meta.get("description", "")),
                         "body_tokens": _audit.tokens("\n".join(text.splitlines()[body_start:]))})
     return entries
@@ -228,16 +235,29 @@ def cmd_find(args):
     scored.sort(key=lambda x: (-x[0], x[1]["id"]))
     top = scored[: args.limit]
     if args.json:
-        print(json.dumps([dict(e, score=round(s, 2)) for s, e in top], indent=2, ensure_ascii=False))
+        print(json.dumps([safe_entry(e, s) for s, e in top], indent=2, ensure_ascii=False))
         return
     if not top:
         print("No matches in the local index. Try other words, or `airlock sync` to refresh.")
         return
     for i, (s, e) in enumerate(top, 1):
-        desc = _audit.sanitize(e["description"], 220)
+        e = safe_entry(e, s)
         print(f"{i:>2}. {e['id']}  [{e['trust']}]  score {s:.1f} · ~{e['desc_tokens']}+{e['body_tokens']} tok"
               f" · scripts: {'yes' if e['has_scripts'] else 'no'} · {e['date'] or e['commit'][:10]}")
-        print(f"    {desc}")
+        print(f"    {e['description']}")
+
+
+def safe_entry(e, score):
+    """An index entry fit to show an agent: sanitised, and flagged text withheld rather than echoed."""
+    flags = e.get("flags") or []
+    desc = clean(e["description"], 220)
+    if flags:
+        desc = (f"[description withheld: {', '.join(flags)}; text aimed at the agent or an invalid name. "
+                f"Run `airlock inspect {clean(e['id'], 80)}` to see the evidence.]")
+    return {"id": clean(e["id"], 120), "name": clean(e["name"], 64), "trust": clean(e["trust"], 20),
+            "source": clean(e["source"], 60), "description": desc, "flags": flags, "score": round(score, 2),
+            "has_scripts": e["has_scripts"], "desc_tokens": e["desc_tokens"], "body_tokens": e["body_tokens"],
+            "commit": clean(e["commit"], 40), "date": clean(e.get("date") or "", 12)}
 
 
 # ---------- resolving skills ----------
@@ -247,14 +267,14 @@ def resolve_catalog(ref):
     p = Path(ref).expanduser()
     if (p / "SKILL.md").is_file() or (ref.startswith((".", "/", "~")) and p.is_dir()):
         p = p.resolve()
-        return {"id": f"local/{p.name}", "source": "local", "trust": "local", "name": p.name, "path": str(p),
+        return {"id": f"local/{qid(p.name)}", "source": "local", "trust": "local", "name": qid(p.name), "path": str(p),
                 "commit": "-", "root": p}
     idx = load_index()
     hits = [e for e in idx if e["id"] == ref] or [e for e in idx if e["name"] == ref]
     if not hits:
-        raise Fail(f"'{ref}' is not in the index (try `airlock find`) and is not a skill directory")
+        raise Fail(f"'{clean(ref, 80)}' is not in the index (try `airlock find`) and is not a skill directory")
     if len(hits) > 1:
-        raise Fail(f"'{ref}' is ambiguous: " + ", ".join(e["id"] for e in hits))
+        raise Fail(f"'{clean(ref, 80)}' is ambiguous: " + ", ".join(clean(e["id"], 120) for e in hits))
     e = dict(hits[0])
     src = next((s for s in load_sources() if s["id"] == e["source"]), None)
     if src is None:
@@ -280,18 +300,18 @@ def resolve_quarantine(ref):
     items = quarantined()
     hits = [m for m in items if m["id"] == ref] or [m for m in items if m["name"] == ref]
     if not hits:
-        raise Fail(f"'{ref}' has not been inspected: run `airlock inspect {ref}` first")
+        raise Fail(f"'{clean(ref, 80)}' has not been inspected: run `airlock inspect {clean(ref, 80)}` first")
     if len(hits) > 1:
-        raise Fail(f"'{ref}' is ambiguous: " + ", ".join(m["id"] for m in hits))
+        raise Fail(f"'{clean(ref, 80)}' is ambiguous: " + ", ".join(clean(m["id"], 120) for m in hits))
     m = hits[0]
     if tree_hashes(m["qdir"] / "skill") != m["files"]:
-        raise Fail(f"{m['id']} changed in quarantine after it was inspected: run `airlock inspect` again")
+        raise Fail(f"{clean(m['id'], 120)} changed in quarantine after it was inspected: run `airlock inspect` again")
     return m
 
 
 def gate(m, force):
     if m["verdict"] == "BLOCK" and not force:
-        raise Fail(f"{m['id']} has HIGH audit findings (see `airlock inspect {m['id']}`). "
+        raise Fail(f"{clean(m['id'], 120)} has HIGH audit findings (see `airlock inspect {clean(m['id'], 120)}`). "
                    "Not proceeding. Only the user can decide to override with --force.")
 
 
@@ -309,14 +329,15 @@ def cmd_inspect(args):
             "origin": str(e["root"]), "inspected_at": iso(now()), "verdict": report["verdict"],
             "counts": report["counts"], "files": tree_hashes(qdir / "skill"), "uses": []}
     save_json(qdir / "meta.json", meta)
-    text = _audit.render(report, title=f"{e['id']} @ {e['commit'][:10]}")
+    text = _audit.render(report, title=f"{clean(e['id'], 120)} @ {clean(e['commit'], 10)}")
     (qdir / "audit.txt").write_text(text + "\n", encoding="utf-8")
     print(text)
     print(f"\nQuarantined at {qdir / 'skill'} (nothing installed).")
     if report["verdict"] == "BLOCK":
         print("Recommendation: do not use. HIGH findings above.")
     else:
-        print(f"Next: `airlock use {e['id']}` (this task only) or `airlock dock {e['id']} --temp 7d | --keep`.")
+        sid = clean(e["id"], 120)
+        print(f"Next: `airlock use {sid}` (this task only) or `airlock dock {sid} --temp 7d | --keep`.")
 
 
 def installed_dirs():
@@ -358,7 +379,7 @@ def cmd_use(args):
     gate(m, args.force)
     m["uses"] = (m.get("uses") or [])[-49:] + [iso(now())]
     save_json(m["qdir"] / "meta.json", {k: v for k, v in m.items() if k != "qdir"})
-    print(f"ONCE: {m['id']} (audit {m['verdict']}). Nothing installed; no future session will load it.")
+    print(f"ONCE: {clean(m['id'], 120)} (audit {m['verdict']}). Nothing installed; no future session will load it.")
     print(f"Read and follow for this task only: {m['qdir'] / 'skill' / 'SKILL.md'}")
     print(f"Files it refers to are relative to:  {m['qdir'] / 'skill'}")
 
@@ -374,7 +395,7 @@ def cmd_dock(args):
     gate(m, args.force)
     name = m["name"]
     if not SAFE_NAME.match(name):
-        raise Fail(f"refusing to install: unsafe skill name {name!r}")
+        raise Fail(f"refusing to install: the skill's frontmatter name is not a valid skill name ({clean(name, 40)!r})")
     agents = [a.strip() for a in args.agent.split(",") if a.strip()]
     for a in agents:
         if a not in AGENTS:
@@ -432,17 +453,24 @@ def cmd_vent(args):
                 _remove(p, name)
         dropped = []
         if not args.keep_quarantine:
-            for m in quarantined():
-                if name in (m["name"], m["id"]) or (entry and m["id"] == entry["id"]):
-                    shutil.rmtree(m["qdir"])
-                    dropped.append(m["id"])
+            items = quarantined()
+            if entry:
+                hits = [m for m in items if m["id"] == entry["id"]]
+            else:
+                hits = [m for m in items if m["id"] == name] or [m for m in items if m["name"] == name]
+                if len(hits) > 1:
+                    raise Fail(f"'{clean(name, 60)}' matches several quarantined skills: "
+                               + ", ".join(clean(m["id"], 120) for m in hits) + ". Vent one by its full id.")
+            for m in hits:
+                shutil.rmtree(m["qdir"])
+                dropped.append(m["id"])
         if entry or dropped:
             vented.append(name)
             if not args.hook:
                 where = ", ".join(entry["paths"]) if entry else "quarantine only"
-                print(f"VENTED {name} ({where})")
+                print(f"VENTED {clean(name, 60)} ({where})")
         elif not args.hook:
-            print(f"  '{name}' is not docked or quarantined; nothing to do")
+            print(f"  '{clean(name, 60)}' is not docked or quarantined; nothing to do")
     if changed:
         save_json(STATE / "lock.json", lock)
     if args.hook and vented:
@@ -456,14 +484,14 @@ def cmd_list(args):
         print("  (none)")
     for name, e in sorted(lock.items()):
         until = f"expires {e['expires']}" if e.get("expires") else "kept"
-        print(f"  {name:<28} {e['mode']:<5} {until:<32} {e['verdict']:<6} {e['id']} → {', '.join(e['agents'])}")
+        print(f"  {clean(name, 40):<28} {e['mode']:<5} {until:<32} {e['verdict']:<6} {clean(e['id'], 80)} → {', '.join(e['agents'])}")
     print("Quarantine")
     items = quarantined()
     if not items:
         print("  (none)")
     for m in items:
         used = f"used {len(m.get('uses') or [])}×" if m.get("uses") else "not used"
-        print(f"  {m['id']:<44} {m['verdict']:<6} inspected {m['inspected_at'][:10]} · {used}")
+        print(f"  {clean(m['id'], 60):<44} {m['verdict']:<6} inspected {m['inspected_at'][:10]} · {used}")
 
 
 def cmd_verify(args):
@@ -538,7 +566,7 @@ def cmd_budget(args):
         with open(d / "SKILL.md", encoding="utf-8", errors="replace") as fh:
             text = fh.read()
         meta, body_start = _audit.parse_frontmatter(text)
-        name = meta.get("name") or d.name
+        name = clean(meta.get("name") or d.name, 40)
         rows.append({"agent": agent, "dir": d.name, "name": name, "desc": meta.get("description", ""),
                      "dt": _audit.tokens(name + meta.get("description", "")),
                      "bt": _audit.tokens("\n".join(text.splitlines()[body_start:])),
