@@ -44,13 +44,15 @@ if any("airlock vent --expired" in h.get("command", "") for e in hooks for h in 
     print("  ✓ SessionStart hook already registered; settings.json unchanged")
     sys.exit(0)
 hooks.append({"hooks": [{"type": "command", "command": cmd}]})
-if os.path.exists(path):
+existed = os.path.exists(path)
+if existed:
     shutil.copy(path, f"{path}.bak-{time.strftime('%Y%m%d-%H%M%S')}")
 os.makedirs(os.path.dirname(path), exist_ok=True)
 with open(path, "w", encoding="utf-8") as fh:
     json.dump(cfg, fh, indent=2)
     fh.write("\n")
-print("  ✓ SessionStart hook registered (removes expired temporary skills); previous settings backed up")
+print("  ✓ SessionStart hook registered (removes expired temporary skills); "
+      + ("previous settings backed up" if existed else "created ~/.claude/settings.json"))
 PY
 fi
 
