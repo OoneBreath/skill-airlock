@@ -225,7 +225,7 @@ into `~/.claude/settings.json`, keeping everything else, and backs it up first. 
 
 ## Pairs with Project Brain
 
-On the roadmap: with [Project Brain](https://github.com/OoneBreath/claude-code-project-brain),
+On the roadmap: with [Project Brain](https://github.com/OoneBreath/project-brain),
 the agent remembers which skill worked for which kind of task without keeping it installed. Next
 time it already knows what to rent.
 
@@ -239,7 +239,7 @@ time it already knows what to rent.
 ## Author
 
 Slawomir Luzny · [FixFlex](https://fixflex.co.uk) · also the author of
-[Project Brain](https://github.com/OoneBreath/claude-code-project-brain).
+[Project Brain](https://github.com/OoneBreath/project-brain).
 
 ## License
 
