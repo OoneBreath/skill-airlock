@@ -10,6 +10,12 @@ they touch your machine, asks you, uses them, and lets them go when the job is d
 [![Runtime deps](https://img.shields.io/badge/runtime%20deps-zero-success)](#install)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-success)](#privacy)
 
+![Skill Airlock in a real Claude Code session: the agent finds two candidate skills, blocks the one that uploads ~/.ssh, asks, then uses the official PDF skill once and extracts the tables](docs/demo.gif)
+
+<sub>A real, unscripted Claude Code session (one prompt; the mode question answered with the agent's own recommendation). The malicious skill is an inert test fixture from <code>tests/fixtures/</code>.</sub>
+
+The same flow as a conversation:
+
 ```
 You:    Pull the tables out of report.pdf. Pick suitable skills for this.
 
