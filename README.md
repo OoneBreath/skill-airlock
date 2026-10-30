@@ -155,7 +155,8 @@ yours to override after reading it. All 7 malicious test fixtures are blocked.
 
 v0.1.1 closed three bypasses found by an independent review: download-and-run in `SKILL.md` prose,
 exfiltration split across two scripts behind generic description words, and instructions to the
-agent hidden in the frontmatter `name`. Each is now a test fixture.
+agent hidden in the frontmatter `name`. Each is now a test fixture. The full record, skill by skill, is
+in [docs/calibration.md](docs/calibration.md).
 
 **Limits.** This is a static filter. A clean report means "nothing known was found", not "safe".
 Excerpts are printed as untrusted data, with invisible characters made visible, so the report
