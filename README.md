@@ -166,6 +166,9 @@ Each is now a test case. The full record, skill by skill, is in [docs/calibratio
 **Limits.** This is a static filter. A clean report means "nothing known was found", not "safe".
 Pattern rules can always be evaded by code written to dodge them, so treat REVIEW as "read it
 yourself", and read the scripts of any skill from a source you don't know, whatever the verdict.
+
+**Found a way past the audit?** Please report it privately, as described in [SECURITY.md](SECURITY.md).
+Each confirmed bypass becomes a test case and is recorded in [docs/calibration.md](docs/calibration.md).
 Excerpts are printed as untrusted data, with invisible characters made visible, so the report
 itself can't smuggle instructions to the agent that reads it.
 
