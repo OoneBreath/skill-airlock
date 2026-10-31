@@ -36,7 +36,9 @@ FETCHES_INSTRUCTIONS = re.compile(r"\b(fetch\w*|download\w*|retriev\w*|load\w*|p
 # "Read <url> and follow every step": no fetch verb, but the URL is still the instructions.
 READ_VERB = re.compile(r"\b(read|open|visit|go\s+to|navigate\s+to|check|consult|load)\b", re.IGNORECASE)
 FOLLOWS = re.compile(r"\b(follow|obey|apply|execute|carry\s+out|comply\s+with|do\s+what)\b(\W+\w+){0,4}?\W+"
-                     r"(steps?|instructions?|rules?|guidelines?|directions?|commands?|it|them|everything|whatever)\b",
+                     r"(steps?|instructions?|rules?|guidelines?|directions?|commands?|it|them|everything|whatever)\b|"
+                     r"\b(use|treat|take)\s+(it|them|this|that)\s+as\s+(your\s+|the\s+|its\s+)?(new\s+|current\s+)?"
+                     r"(instructions?|rules|guidance|guidelines|prompt|system\s+prompt|checklist)\b",
                      re.IGNORECASE)
 # Files SKILL.md tells the agent to run ("bash scripts/setup", "python3 tools/x.txt", "./run"): scripts whatever
 # their extension, so a .txt or extensionless file can't dodge the script checks.
@@ -314,11 +316,13 @@ def _remote_fetches(text):
             window = lines[max(0, i - 3):i + 4]
             verb_lines = [l for l in window if FETCH_VERB.search(l)]
             follows = any(FOLLOWS.search(l) for l in window)
+            # "The checklist lives at <url>: follow it." An order to obey, on the URL's line or the next, is enough.
+            follows_here = any(FOLLOWS.search(l) for l in lines[i:i + 2])
             if verb_lines:
                 instr = (bool(INSTRUCTION_FILE.search(m.group(0))) or follows
                          or any(FETCHES_INSTRUCTIONS.search(l) for l in [line] + verb_lines))
                 out.append((i + 1, m.group(0), instr))
-            elif follows and any(READ_VERB.search(l) for l in window):
+            elif follows_here or (follows and any(READ_VERB.search(l) for l in window)):
                 out.append((i + 1, m.group(0), True))
     return out
 
