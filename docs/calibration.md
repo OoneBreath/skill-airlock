@@ -13,7 +13,7 @@ and `vercel-labs/agent-skills`, mirrored on 30 October 2026 (claude-plugins-offi
 | v0.1.1 (after an independent review) | 1 | 21 | 40 | 7 / 7 |
 | v0.1.2 (two false positives fixed) | 1 | 21 | 40 | 7 / 7 |
 | v0.1.3 (remote instructions rule) | 1 | 23 | 38 | 7 / 7 + 1 REVIEW fixture |
-| v0.1.4 (after a second independent review) | 1 | 24 | 37 | 7 / 7 + 11 / 12 review cases (1 REVIEW by design) |
+| v0.1.4 (after a second independent review) | 1 | 24 | 37 | 7 / 7 + 10 or 11 / 12 review cases (see v0.1.4) |
 
 v0.1.0 shipped 5 fixtures: 4 malicious (`exfil`, `hidden`, `obfuscated`, `persistence`) and 1 clean.
 v0.1.1 added 3 malicious ones (`prose-pipe`, `split-exfil`, `name-injection`).
@@ -101,7 +101,10 @@ A second independent review wrote 12 inert malicious skills against v0.1.3. None
 | 11 | a quoted paragraph in `SKILL.md` that starts "Ignore all previous instructions" | REVIEW | BLOCK | any quote counted as a mention |
 | 12 | `cu\` + newline + `rl … \| sh` | CLEAN | BLOCK | line continuations not joined |
 
-The v0.1.3 column is our own re-run of the probes; none got BLOCK. Each probe is now a case in
+The v0.1.3 column is our own re-run of the probes; none got BLOCK. Two stay REVIEW by design: #10 (a
+typo can't be detected statically) and, in the reviewer's own version of #11, a short quoted phrase that
+closes right after the attack words, which still counts as a mention. Our #11, a quoted paragraph that
+goes on to give orders, is BLOCK. So the count is 10/12 BLOCK on the reviewer's probes, 11/12 on ours. Each probe is now a case in
 `test_second_review_bypasses`, together with "run the use command with `--force`", which
 `airlock-override` missed; all 13 fail on v0.1.3.
 
