@@ -57,10 +57,17 @@ LINE_RULES = [
     ("network", MEDIUM, r"\b(curl|wget|ncat|netcat|socat|telnet|sftp|scp)\b", "network tool"),
     ("network", MEDIUM, r"(?<![\w.-])nc\s+-?[a-zA-Z0-9]", "netcat"),
     ("network", MEDIUM, r"\b(requests|httpx)\.(get|post|put|patch|delete|request|head|Session|Client|AsyncClient)\b", "HTTP client"),
-    ("network", MEDIUM, r"\burllib(3|\.request)\b|\burlopen\s*\(|\bhttp\.client\b|\baiohttp\b", "HTTP client"),
+    ("network", MEDIUM, r"\burllib(3|\.request)\b|\burlopen\b|\bhttp\.client\b|\baiohttp\b|^\s*from\s+urllib\s+import\b[^\n]*\brequest\b|"
+                        r"^\s*(import|from)\s+(requests|httpx|ftplib|smtplib|paramiko)\b", "HTTP client"),
     ("network", MEDIUM, r"\bsocket\.(socket|create_connection)\b", "raw socket"),
     ("network", MEDIUM, r"(?<![\w.])fetch\(|\baxios\b|\bXMLHttpRequest\b|\bnew\s+WebSocket\b|\bsendBeacon\b", "HTTP client"),
-    ("network", MEDIUM, r"\bInvoke-(WebRequest|RestMethod)\b|\bNet\.WebClient\b", "HTTP client"),
+    # PowerShell is case-insensitive, so these patterns are too.
+    ("network", MEDIUM, r"(?i:\bInvoke-(WebRequest|RestMethod)\b|\bNet\.WebClient\b|(?<![\w-])(iwr|irm)\s+\S|\bStart-BitsTransfer\b)", "HTTP client"),
+    ("network", MEDIUM, r"\brequire\(\s*[\"'](node:)?(https?|http2|net|dgram|tls)[\"']\s*\)|\bfrom\s+[\"'](node:)?(https?|http2|net|dgram|tls)[\"']|"
+                        r"\bNet::HTTP\b|\bOpen-URI\b|[\"']net/http[\"']|\bfile_get_contents\s*\(\s*[\"']https?:|\bcurl_exec\b", "HTTP client"),
+    ("network", MEDIUM, r"\brsync\b[^\n]*(\S+@[\w.-]+:|rsync://|\s-e\s*[\"']?ssh)|(?<![\w./~-])ssh\s+(-\S+\s+)*(\S+@\S+|[\w-]+\.[\w.-]*\w)|"
+                        r"\b(ftp|tftp|lftp)\s+\S|\bgit\s+push\s+(-\S+\s+)*(https?://|\S+@)|\bnslookup\b|\bdig\s+(@\S+\s+)?\S*[.$][\w({]",
+     "network tool (ssh, rsync, ftp, git push to a URL, DNS lookup)"),
     ("raw-ip", MEDIUM, r"https?://(?!127\.0\.0\.1|0\.0\.0\.0)\d{1,3}(\.\d{1,3}){3}", "URL with a raw IP address"),
     ("reverse-shell", HIGH, r"/dev/(tcp|udp)/", "bash network device, typical of reverse shells"),
     # Bounded on both sides: "toast.promise" must not read as oast.pro, nor "notpastebin.com" as pastebin.com.
@@ -70,20 +77,25 @@ LINE_RULES = [
      "known data-collection or tunnelling endpoint"),
     # secrets
     ("secret-path", MEDIUM, r"(?<![\w-])\.(ssh|aws|gnupg|kube)\b|\bid_(rsa|ed25519|ecdsa|dsa)\b|\.git-credentials|"
-                            r"(?<![\w-])\.(netrc|npmrc|pypirc)\b|\.docker/config\.json|\.config/gh/hosts", "path to credentials"),
+                            r"(?<![\w-])\.(netrc|npmrc|pypirc|pgpass|my\.cnf)\b|\.docker/config\.json|\.config/gh/hosts|"
+                            r"(?<![\w-])\.(bash|zsh)_history\b|/etc/(shadow|sudoers)\b", "path to credentials"),
+    # "~/." + "ssh": a hidden home path assembled from string pieces, so the path itself never appears.
+    ("secret-path", MEDIUM, r"[\"'](~|\$HOME)?/?\.[\"']\s*\+?\s*[\"']|[\"']~/\.?[\"']\s*\+", "hidden path built from string pieces"),
     ("dotenv", MEDIUM, r"(?<![\w./\\-])\.env(?![\w.-])|(?<![\w./\\-])\.env\.(local|production|prod)\b", ".env file"),
     ("env-dump", MEDIUM, r"\bprintenv\s*($|[|;>&)])|(^|[;&|(`]\s*|\$\(\s*)env\s*\||JSON\.stringify\(\s*process\.env\s*\)|"
                          r"json\.dumps?\(\s*(dict\()?\s*os\.environ|print\(\s*(dict\()?\s*os\.environ\s*\)?\s*\)",
      "dumps all environment variables"),
     ("credential-store", HIGH, r"\bsecurity\s+find-(generic|internet)-password\b|Login Data|Cookies\.binarycookies|"
                                r"\bkeyring\.get_password\b", "reads a password or cookie store"),
-    ("agent-credentials", HIGH, r"\.claude/\.credentials|\.codex/auth\.json|\.config/gcloud|application_default_credentials",
+    ("agent-credentials", HIGH, r"\.claude/\.credentials|(?<![\w-])\.claude\.json\b|\.codex/auth\.json|\.config/gcloud|application_default_credentials",
      "reads an agent's or cloud CLI's credentials"),
     ("secret-env", LOW, r"\b[A-Z][A-Z0-9_]*_(TOKEN|SECRET|API_KEY|APIKEY|PASSWORD|PASSWD|PRIVATE_KEY|ACCESS_KEY)\b",
      "secret-looking environment variable"),
     # execution and obfuscation
     ("pipe-to-shell", HIGH, r"\b(curl|wget)\b[^\n]*\|\s*(sudo\s+)?((ba|z|da|k)?sh|python3?|node|perl|ruby|php)\b|"
-                            r"\b(ba|z)?sh\s+(-c\s+)?[\"']?\$\(\s*(curl|wget)|\b(ba|z)?sh\s+<\(\s*(curl|wget)",
+                            r"\b(ba|z)?sh\s+(-c\s+)?[\"']?\$\(\s*(curl|wget)|\b(ba|z)?sh\s+<\(\s*(curl|wget)|"
+                            r"(?i:\b(iwr|irm|Invoke-WebRequest|Invoke-RestMethod|DownloadString)\b[^\n]*(\|\s*(iex|Invoke-Expression)\b)|"
+                            r"\b(iex|Invoke-Expression)\b[^\n]*\b(iwr|irm|Invoke-WebRequest|Invoke-RestMethod|DownloadString)\b)",
      "downloads and runs code in one step"),
     ("decode-and-run", HIGH, r"base64\s+(-d|--decode|-D)\b[^\n]*\|\s*(sudo\s+)?((ba|z|da)?sh|python3?|perl|node)\b|"
                              r"exec\s*\(\s*(base64\.)?b64decode|eval\s*\(\s*(atob|Buffer\.from)\s*\(|exec\s*\(\s*(zlib|marshal|codecs)\.",
@@ -98,14 +110,19 @@ LINE_RULES = [
     ("shell-rc-write", HIGH, r"((?<![-=])>>?|\btee\b(\s+-a)?)\s*['\"]?(~|\$HOME|\$\{HOME\})?/?\S*\.(bashrc|zshrc|bash_profile|zprofile|profile|zshenv)\b",
      "writes to a shell startup file"),
     ("shell-rc", MEDIUM, r"(?<![\w-])\.(bashrc|zshrc|bash_profile|zprofile|zshenv)\b", "mentions a shell startup file"),
-    ("agent-config", HIGH, r"\.claude/settings(\.local)?\.json|\.claude/(hooks|commands|agents)/|\.codex/config\.toml|"
-                           r"\.gemini/settings\.json|\.cursor/(mcp|rules)|\.mcp\.json|claude_desktop_config\.json",
+    # Settings, hooks and MCP config make code run on their own, every session; commands and subagents are
+    # instructions the agent loads later. (.claude/skills/ is left out: skills name their own path all the time.)
+    ("agent-config", HIGH, r"\.claude/settings(\.local)?\.json|\.claude/hooks/|\.codex/config\.toml|"
+                           r"\.gemini/settings\.json|\.cursor/mcp|\.mcp\.json|claude_desktop_config\.json",
      "touches the agent's own settings, hooks or MCP config"),
+    ("agent-instructions", MEDIUM, r"\.claude/(commands|agents)/|\.cursor/rules", "adds commands or subagents the agent loads later"),
     ("ssh-authorized-keys", HIGH, r"authorized_keys", "can grant remote SSH access"),
     ("privilege", MEDIUM, r"(?<![\w-])sudo\s", "asks for root"),
     ("destructive", HIGH, r"\brm\s+-[a-zA-Z]*[rR][a-zA-Z]*\s+(-[a-zA-Z]+\s+)*['\"]?(/|~|\$HOME|\$\{HOME\})['\"]?(\s|$|/\*)|"
                           r"(^|[;&|(]\s*|\$\(\s*|`)(sudo\s+)?(mkfs(\.\w+)?\s+(-\S+\s+)*/dev/|dd\s+if=\S+\s+of=/dev/)|:\(\)\s*\{\s*:\|:&\s*\};:", "can destroy data"),
-    ("runtime-install", LOW, r"\b(pip3?|npm|pnpm|yarn|gem|cargo)\s+(install|add|i)\b|\bgo\s+(install|get)\b|\bnpx\s+(-y\s+)?[@\w]",
+    # LOW in Markdown (a named package the agent shows you); MEDIUM in script code (see audit()).
+    ("runtime-install", LOW, r"\b(pip3?|npm|pnpm|yarn|gem|cargo|uv\s+pip)\s+(install|add|i)\b|\bgo\s+(install|get)\b|"
+                             r"\b(npx|bunx|pnpx)\s+(-y\s+|--yes\s+)?[@\w]|\buvx\s+[@\w]",
      "installs packages at runtime"),
     # instructions aimed at the agent
     ("injection", HIGH, r"\b(ignore|disregard|forget|override)\s+(all\s+|any\s+)?(of\s+)?(the\s+|your\s+)?(previous|prior|above|earlier|"
@@ -122,7 +139,8 @@ LINE_RULES = [
                                    r"agreed\s+to)\s+(this|it|the\s+install|installing|running)\b|"
                                    r"\bno\s+(need\s+for|further)\s+(user\s+)?(approval|consent|confirmation)\b",
      "claims consent the user never gave"),
-    ("airlock-override", HIGH, r"\b(airlock|dock|vent)\b[^\n]{0,80}--force\b|--force\b[^\n]{0,80}\b(airlock|dock)\b",
+    ("airlock-override", HIGH, r"\b(airlock|dock|vent)\b[^\n]{0,80}--force\b|--force\b[^\n]{0,80}\b(airlock|dock)\b|"
+                               r"\b(use|dock|inspect)\s+(command|subcommand|step)\b[^\n]{0,80}--force\b|--force\b[^\n]{0,80}\b(use|dock)\s+(command|subcommand|step)\b",
      "tells the agent to override skill-airlock's own checks"),
     ("without-asking", MEDIUM, r"\b(run|proceed|execute|install|delete|remove|send|upload|continue|apply|push|commit|overwrite|dock|use|"
                                r"enable|download|fetch|modify|write|edit|change|grant|approve|accept|allow|start|launch|"
@@ -145,8 +163,9 @@ SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 NET_WORDS = re.compile(r"\b(api|apis|http|https|web|website|url|urls|download|upload|fetch|online|internet|cloud|remote|"
                        r"github|gitlab|slack|discord|email|e-mail|webhook|deploy|browse|browser|scrape|crawl|endpoint|"
                        r"network)s?\b", re.IGNORECASE)
-CONFIG_WORDS = re.compile(r"\b(hooks?|settings|config|configure|configuration|plugins?|mcp|claude\s+code|agents?|subagents?|"
-                          r"automations?|permissions?|skills?)\b", re.IGNORECASE)
+# "skill" and "agent" are not here: nearly every description says "use this skill", which excused everything.
+CONFIG_WORDS = re.compile(r"\b(hooks?|settings|config|configure|configuration|plugins?|mcp|claude\s+code|subagents?|"
+                          r"automations?|permissions?)\b", re.IGNORECASE)
 SECRET_WORDS = re.compile(r"\b(credentials?|(access|api|auth|bearer|github|oauth)\s+tokens?|secrets?|auth|oauth|authentication|"
                           r"ssh|passwords?|keychain|vault|"
                           r"api[\s_-]?keys?|private\s+keys?|dotenv)\b|\.env\b", re.IGNORECASE)
@@ -236,10 +255,17 @@ def instruction_hits(text):
     return sorted({r for r, _, rx, _ in COMPILED if r in INSTRUCTION_RULES and rx.search(text)})
 
 
-def _quoted(line, start):
-    """True when a match sits inside backticks or right after an opening quote."""
+CLOSING = {"`": "`", "\"": "\"", "'": "'", "\u201c": "\u201d", "\u2018": "\u2019"}
+
+
+def _quoted(line, start, end=None):
+    """True when a match sits inside backticks or right after an opening quote. With end, the quote must
+    also close right after the match: a quoted phrase is a mention, a quoted paragraph is an instruction."""
     before = line[:start]
-    return before.count("`") % 2 == 1 or before.rstrip(" (")[-1:] in ("\"", "'", "\u201c", "\u2018")
+    opener = "`" if before.count("`") % 2 == 1 else before.rstrip(" (")[-1:]
+    if opener not in CLOSING:
+        return False
+    return end is None or CLOSING[opener] in line[end:end + 12]
 
 
 def _is_comment(line):
@@ -253,7 +279,7 @@ def _declared(rule, desc):
         return bool(NET_WORDS.search(desc))
     if rule in ("secret-path", "dotenv", "env-dump", "secret-env"):
         return bool(SECRET_WORDS.search(desc))
-    if rule == "agent-config":
+    if rule in ("agent-config", "agent-instructions"):
         return bool(CONFIG_WORDS.search(desc))
     return False
 
@@ -281,6 +307,24 @@ def _remote_fetches(text):
     return out
 
 
+def _logical_lines(text, is_md):
+    """(line number, line) with backslash-newline continuations joined, as a shell reads them:
+    "cu\\<newline>rl" is curl. Markdown prose is left alone; its fenced blocks are joined."""
+    raw = text.splitlines()
+    in_fence, i = False, 0
+    while i < len(raw):
+        no, line = i + 1, raw[i]
+        if is_md and line.lstrip().startswith(("```", "~~~")):
+            in_fence = not in_fence
+        elif not is_md or in_fence:
+            joined = 0
+            while i + 1 < len(raw) and joined < 200 and (len(line) - len(line.rstrip("\\"))) % 2 == 1:
+                i, joined = i + 1, joined + 1
+                line = line[:-1] + raw[i]
+        yield no, line
+        i += 1
+
+
 def _is_script(path, text):
     ext = os.path.splitext(path)[1].lower()
     return ext in SCRIPT_EXT or text.startswith("#!")
@@ -297,7 +341,7 @@ def audit(root):
     rules_by_file = {}
 
     def add(sev, rule, rel, line, excerpt, note):
-        key = (rule, rel)
+        key = (rule, rel, sev)
         counts_per_rule[key] = counts_per_rule.get(key, 0) + 1
         if counts_per_rule[key] > MAX_PER_RULE_PER_FILE:
             return
@@ -328,19 +372,29 @@ def audit(root):
             if name.startswith(".") and name not in BENIGN_DOTFILES:
                 add(LOW, "hidden-file", rel, 0, name, "hidden file")
             size = os.path.getsize(full)
+            ext = os.path.splitext(name)[1].lower()
+            # Scripts and Markdown are what runs or instructs; one padded past the scan limit is not normal.
+            textual = ext in SCRIPT_EXT or ext in (".md", ".markdown") or name == "SKILL.md"
             if size > MAX_BYTES:
-                add(MEDIUM, "large-file", rel, 0, f"{size} bytes", "too large to scan; review by hand")
+                with open(full, "rb") as fh:
+                    textual = textual or fh.read(2) == b"#!"
+                add(HIGH if textual else MEDIUM, "large-file", rel, 0, f"{size} bytes",
+                    "script or Markdown too large to scan" if textual else "too large to scan; review by hand")
                 continue
             with open(full, "rb") as fh:
                 data = fh.read()
-            ext = os.path.splitext(name)[1].lower()
             if hashlib.sha256(data).hexdigest() in _self_hashes():
                 add(LOW, "self", rel, 0, name, "skill-airlock's own code (byte-identical); rule tables not scanned")
                 continue
             if b"\x00" in data[:8192]:
-                add(LOW if ext in ASSET_EXT else MEDIUM, "binary-asset" if ext in ASSET_EXT else "binary", rel, 0,
-                    f"{size} bytes", "binary file; cannot be reviewed as text")
-                continue
+                if not (textual or data.startswith(b"#!")):
+                    add(LOW if ext in ASSET_EXT else MEDIUM, "binary-asset" if ext in ASSET_EXT else "binary", rel, 0,
+                        f"{size} bytes", "binary file; cannot be reviewed as text")
+                    continue
+                # Shells and agents read past a NUL byte; a scanner that stops there sees nothing.
+                add(HIGH, "nul-in-text", rel, data[:data.index(b"\x00")].count(b"\n") + 1, f"{size} bytes",
+                    "NUL byte in a script or Markdown file, which hides it from text tools; scanned anyway")
+                data = data.replace(b"\x00", b"")
             text = data.decode("utf-8", errors="replace")
             is_script = _is_script(name, text)
             if is_script:
@@ -349,7 +403,7 @@ def audit(root):
             is_md = ext in (".md", ".markdown")
             is_skill_md = rel == "SKILL.md"
             in_fence = False
-            for no, line in enumerate(text.splitlines(), 1):
+            for no, line in _logical_lines(text, is_md):
                 if no == 1 and line.startswith("\ufeff"):
                     line = line[1:]
                 scan = line[:MAX_LINE]
@@ -378,11 +432,13 @@ def audit(root):
                     if not m:
                         continue
                     if rule in INSTRUCTION_RULES:
-                        if _quoted(scan, m.start()) and (descriptive or is_skill_md):
+                        if _quoted(scan, m.start(), None if descriptive else m.end()) and (descriptive or is_skill_md):
                             sev = LOW if descriptive else (MEDIUM if sev == HIGH else sev)
                             note += " (quoted mention)"
                     elif descriptive:
                         sev = DOWNGRADE[sev]
+                    elif rule == "runtime-install" and is_script:
+                        sev, note = MEDIUM, "script installs packages at run time; that code was never audited (check the name)"
                     if _declared(rule, desc):
                         sev, note = DOWNGRADE[sev], note + " (declared in the description)"
                     add(sev, rule, rel, no, scan, note)

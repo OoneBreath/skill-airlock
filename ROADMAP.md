@@ -20,7 +20,12 @@ Ordered by what makes the tool useful soonest. Versions are targets, not promise
 
 - [ ] `airlock update`: show the diff against the pinned commit and **what the audit says now that it
       didn't before** (e.g. "new network access in scripts/sync.sh"); ask before applying
-- [ ] Trust list and blocklist (authors, repos, specific commits)
+- [ ] Trust list and blocklist (authors, repos, specific commits). A skill with scripts from a source
+      that isn't on the trust list is REVIEW at least, whatever the static rules find: they can be evaded
+- [ ] Sandboxed runs of a skill's bundled scripts where the OS provides one (no network, read-only
+      outside a work dir). Instructions the agent follows can't be sandboxed this way; scripts can.
+- [ ] Decision log: who approved which skill, at which commit and audit verdict, for how long, and
+      when and why it was vented (`lock.json` already records the install side)
 - [ ] Profiles: a named set of skills per project or kind of work, switched in one command
 - [ ] Plugin and built-in skills in `budget`
 - [ ] Usage counts per skill in `budget` (not just last use)
@@ -31,8 +36,6 @@ Ordered by what makes the tool useful soonest. Versions are targets, not promise
       optionally mirrored into Project Brain so the agent knows what to rent next time
 - [ ] Gap detection: a task you repeat that no skill covers, with an offer to draft one
 - [ ] Fork & adapt: a local copy tuned to you, tracking upstream so updates still show a diff
-- [ ] Sandboxed runs of a skill's bundled scripts (no network, read-only outside a work dir).
-      Instructions the agent follows can't be sandboxed this way; scripts can.
 - [ ] More agents: Gemini CLI, Cursor, Copilot, OpenCode, …, after checking each one's docs
 - [ ] `fork` mode for agents that can run a skill in a sub-agent
 

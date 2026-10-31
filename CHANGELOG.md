@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.1.4: twelve bypasses from a second independent review
+
+A second independent review wrote 12 inert malicious skills against v0.1.3. None got BLOCK. All 12
+are now test cases; 11 BLOCK and one is REVIEW by design.
+
+- **Report limit hid the real finding.** The cap of 5 findings per rule and file did not look at
+  severity: five commented-out `curl … | sh` lines (MEDIUM) used it up, and the live one (HIGH) never
+  reached the report. The cap is now per severity, so the most severe finding is always reported.
+- **"skill" excused agent config.** `skill(s)` and `agent(s)` were in the vocabulary that declares
+  configuration work, and nearly every description says "use this skill". A script that adds a
+  `SessionStart` hook to `~/.claude/settings.json` got REVIEW. Both words are gone. `.claude/commands/`
+  and `.claude/agents/` are split into a new MEDIUM rule `agent-instructions`: they hold instructions
+  the agent loads later. Settings, hooks and MCP config make code run on their own, so they stay HIGH.
+- **NUL bytes.** A file with a NUL byte in its first 8 KB was treated as binary and skipped, yet bash
+  runs the rest of such a script. A NUL byte in a script or Markdown file is now HIGH (`nul-in-text`),
+  and the file is scanned anyway.
+- **Padding.** A script or Markdown file over the 2 MB scan limit is now HIGH (other large files stay MEDIUM).
+- **Line continuations.** `cu\` plus a newline plus `rl … | sh` is `curl … | sh` to the shell. Backslash
+  continuations are now joined before scanning, in scripts and in fenced blocks.
+- **More of the network.** Python `from urllib import request` and a bare `urlopen`; Node
+  `require("https")`, `net`, `dgram` and `tls`; Ruby `Net::HTTP`, Go `net/http`, PHP `file_get_contents("http…")`;
+  `ssh user@host`, `rsync` to a remote host, `ftp`, `git push` to a URL, `nslookup` and `dig`.
+  PowerShell is matched case-insensitively, `irm`/`iwr` included, and `irm … | iex` is download-and-run.
+- **More secrets.** Shell history, `.pgpass`, `.my.cnf`, `/etc/shadow`, `~/.claude.json`, and hidden
+  paths assembled from string pieces (`"~/." + "ssh"`).
+- **Quoted paragraphs.** In `SKILL.md`, a quoted attack phrase counts as a mention (MEDIUM) only if
+  the quote closes right after it. A quoted paragraph that goes on to give orders now counts in full.
+- **Package installs in scripts.** `pip install`, `npm install`, `npx -y` and friends in script code
+  are now MEDIUM: the installed code was never audited, and a typo-squatted name looks like a real one.
+  In Markdown they stay LOW.
+- `airlock-override` also catches "run the use command with `--force`".
+- The SessionStart hook command quotes its path, so a space in `$HOME` or the plugin root no longer
+  breaks it. `install.sh` recognises the older unquoted hook and does not add a second one.
+- Calibration on the 62 public skills: 1 BLOCK, 24 REVIEW, 37 CLEAN/OK. The new REVIEW is
+  `web-artifacts-builder`, whose setup script runs `npm install -g pnpm` and `pnpm install`. 30 tests.
+
 ## 0.1.3: skills that fetch their instructions at run time
 
 - New rule `remote-instructions` (MEDIUM): `SKILL.md` tells the agent to fetch its rules or

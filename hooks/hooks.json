@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/skills/skill-airlock/airlock vent --expired --hook"
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/skill-airlock/airlock\" vent --expired --hook"
           }
         ]
       }

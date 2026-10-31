@@ -7,7 +7,7 @@ set -euo pipefail
 SRC="$(cd "$(dirname "$0")" && pwd)/skills/skill-airlock"
 DEST="${HOME}/.claude/skills/skill-airlock"
 SETTINGS="${HOME}/.claude/settings.json"
-HOOK_CMD="python3 ${DEST}/airlock vent --expired --hook"
+HOOK_CMD="python3 \"${DEST}/airlock\" vent --expired --hook"   # quoted: survives a space in $HOME
 
 command -v python3 >/dev/null || { echo "python3 is required"; exit 1; }
 
@@ -40,7 +40,9 @@ if os.path.exists(path):
         print("  ! settings.json is not valid JSON; left untouched, hook not added")
         sys.exit(0)
 hooks = cfg.setdefault("hooks", {}).setdefault("SessionStart", [])
-if any("airlock vent --expired" in h.get("command", "") for e in hooks for h in e.get("hooks", [])):
+def ours(c):  # matches the quoted form and the unquoted one written by v0.1.0-v0.1.3
+    return "airlock" in c and "vent --expired" in c
+if any(ours(h.get("command", "")) for e in hooks for h in e.get("hooks", [])):
     print("  ✓ SessionStart hook already registered; settings.json unchanged")
     sys.exit(0)
 hooks.append({"hooks": [{"type": "command", "command": cmd}]})
