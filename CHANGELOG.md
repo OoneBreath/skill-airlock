@@ -1,9 +1,13 @@
 # Changelog
 
-## 0.1.1: the audit after independent reviews
+## 0.2.0: the audit after independent reviews
 
-Released 31 October 2026. Between 0.1.0 and this release the audit went through two independent
-reviews and a test on a second server. The second review ran four rounds and wrote 31 inert malicious
+Released 31 October 2026. The rule changes between 0.1.0 and 0.2.0 were committed as working
+versions 0.1.1–0.1.7, one per review step, and briefly tagged and published as releases; those
+releases were withdrawn and this entry folds them into one. [docs/calibration.md](docs/calibration.md)
+keeps each round. Version numbers only go up: anyone who installed a working version gets 0.2.0 as an
+update. Between 0.1.0 and this release the audit went through two independent reviews and a test on
+a second server. The second review ran four rounds and wrote 31 inert malicious
 skills and phrasings against the rules. The full record, probe by probe and skill by skill, is in
 [docs/calibration.md](docs/calibration.md). Each bypass below is now a test case.
 

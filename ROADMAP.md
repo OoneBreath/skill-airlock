@@ -16,7 +16,16 @@ Ordered by what makes the tool useful soonest. Versions are targets, not promise
 - [x] Context-aware severity, calibrated on all 62 skills of three public catalogs
 - [x] Tests, including malicious fixtures (exfiltration, hidden instructions, persistence, obfuscation)
 
-## v0.2: keep it under control
+## v0.2: the audit after independent reviews ✓
+
+- [x] Bypasses found by two independent reviews closed, each kept as a test case (31 probes in the
+      second review alone); known limits such as string building stay REVIEW. See
+      [docs/calibration.md](docs/calibration.md)
+- [x] Remote instructions flagged by the shape of the link, not only by wording
+- [x] Files `SKILL.md` runs are audited as scripts, whatever their name
+- [x] CI on Ubuntu and macOS, Python 3.9 and 3.12
+
+## v0.3: keep it under control
 
 - [ ] `airlock update`: show the diff against the pinned commit and **what the audit says now that it
       didn't before** (e.g. "new network access in scripts/sync.sh"); ask before applying
@@ -30,7 +39,7 @@ Ordered by what makes the tool useful soonest. Versions are targets, not promise
 - [ ] Plugin and built-in skills in `budget`
 - [ ] Usage counts per skill in `budget` (not just last use)
 
-## v0.3: learn from use
+## v0.4: learn from use
 
 - [ ] Local ratings ledger: "worked 24×, failed 2×" per skill and task type, no central server;
       optionally mirrored into Project Brain so the agent knows what to rent next time

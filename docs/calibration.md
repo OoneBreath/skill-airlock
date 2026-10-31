@@ -10,18 +10,20 @@ and `vercel-labs/agent-skills`, mirrored on 30 October 2026 (claude-plugins-offi
 |---|---|---|---|---|
 | First rule set (pre-release, never committed) | 18 | 11 | 33 | 4 / 4 fixtures blocked |
 | **v0.1.0** (context-aware severity) | 0 | 16 | 46 | 4 / 4 |
-| Review 1: three bypasses closed | 1 | 21 | 40 | 7 / 7 |
-| Review 1: two false positives fixed | 1 | 21 | 40 | 7 / 7 |
-| Second-server test: remote instructions rule | 1 | 23 | 38 | 7 / 7 + 1 REVIEW fixture |
-| Review 2, round 1 (12 probes) | 1 | 24 | 37 | + 11 / 12 (1 REVIEW by design) |
-| Review 2, round 2 (8 probes) | 1 | 24 | 37 | + 5 / 6 (1 REVIEW by design) |
-| Review 2, round 3 (4 phrasings) | 1 | 24 | 37 | + 2 REVIEW cases |
-| **v0.1.1**, after review 2, round 4 (7 phrasings) | 1 | 24 | 37 | + 9 REVIEW phrasings |
+| Review 1: three bypasses closed · working v0.1.1 | 1 | 21 | 40 | 7 / 7 |
+| Review 1: two false positives fixed · working v0.1.2 | 1 | 21 | 40 | 7 / 7 |
+| Second-server test: remote instructions rule · working v0.1.3 | 1 | 23 | 38 | 7 / 7 + 1 REVIEW fixture |
+| Review 2, round 1 (12 probes) · working v0.1.4 | 1 | 24 | 37 | + 11 / 12 (1 REVIEW by design) |
+| Review 2, round 2 (8 probes) · working v0.1.5 | 1 | 24 | 37 | + 5 / 6 (1 REVIEW by design) |
+| Review 2, round 3 (4 phrasings) · working v0.1.6 | 1 | 24 | 37 | + 2 REVIEW cases |
+| **v0.2.0**, after review 2, round 4 (7 phrasings) · working v0.1.7 | 1 | 24 | 37 | + 9 REVIEW phrasings |
 
 v0.1.0 shipped 5 fixtures: 4 malicious (`exfil`, `hidden`, `obfuscated`, `persistence`) and 1 clean.
-v0.1.1 adds 3 malicious fixtures (`prose-pipe`, `split-exfil`, `name-injection`), one REVIEW fixture
+v0.2.0 adds 3 malicious fixtures (`prose-pipe`, `split-exfil`, `name-injection`), one REVIEW fixture
 (`remote-instructions`) and the review-2 probes as test cases. The rows between the two releases are
-the rule sets that each review round was run against.
+the rule sets that each review round was run against. They were committed as working versions
+v0.1.1–v0.1.7 (the commit titles in the git history) and briefly tagged and published as releases, then
+withdrawn; v0.2.0 is the release that folds them together.
 
 ## The 18 blocks of the first rule set
 
@@ -53,13 +55,13 @@ destructive 4, injection 3, shell-rc-write 2, pipe-to-shell 2, conceal-from-user
 
 All 18 come from Anthropic's and Vercel's catalogs. None of the HIGH findings pointed to malicious
 behaviour. Seventeen were noise; the eighteenth (m5-onboard) is a genuine download-and-run
-instruction from a well-known source, which v0.1.0 let through as REVIEW and v0.1.1 blocks again.
+instruction from a well-known source, which v0.1.0 let through as REVIEW and v0.2.0 blocks again.
 
 ## The three bypasses of v0.1.0
 
 Found by an independent review on release day. The reconstructed first rule set shows where each came from.
 
-| Probe | First rule set | v0.1.0 | v0.1.1 |
+| Probe | First rule set | v0.1.0 | v0.2.0 |
 |---|---|---|---|
 | `curl … \| bash` in SKILL.md prose | BLOCK | REVIEW | BLOCK |
 | `~/.ssh` read in one script, uploaded from another, generic description words | REVIEW | OK | BLOCK |
@@ -122,7 +124,7 @@ which writes a temporary command file for its evals. Those directories are now a
 Calibration: 1 BLOCK, 24 REVIEW, 37 CLEAN/OK.
 
 What this review shows beyond the twelve fixes: line-based patterns can always be evaded by code
-written against them (`getattr`, `chr()`, string building). The README now says so, and the v0.2
+written against them (`getattr`, `chr()`, string building). The README now says so, and the v0.3
 roadmap makes skills with scripts from untrusted sources REVIEW at least, and adds optional
 sandboxed script runs.
 

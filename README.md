@@ -5,7 +5,7 @@
 Give your agent a task. It finds suitable skills in a local index, copies them into quarantine and
 shows you what a static audit found, asks you, uses them, and lets them go when the job is done.
 
-[![Version](https://img.shields.io/badge/version-0.1.1%20alpha-orange)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.0%20alpha-orange)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Runtime deps](https://img.shields.io/badge/runtime%20deps-zero-success)](#install)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-success)](#privacy)
@@ -154,13 +154,13 @@ Severity depends on context, so documentation doesn't drown out real problems:
 `airlock find` never echoes text aimed at the agent: a description that matches an instruction rule,
 or an invalid frontmatter name, is withheld with a pointer to `airlock inspect`.
 
-**Calibration (v0.1.1):** across all 62 skills in the three public catalogs above: 1 BLOCK, 24 REVIEW
+**Calibration (v0.2.0):** across all 62 skills in the three public catalogs above: 1 BLOCK, 24 REVIEW
 (skills that really configure hooks, settings and MCP servers, call the network, tell the agent to
 use `sudo`, install packages from their scripts, or fetch their instructions at run time), 37 CLEAN or OK. The one BLOCK is a `SKILL.md` that tells the agent to run the
 Homebrew installer with `curl … | bash`: a real download-and-run instruction, blocked by design, and
 yours to override after reading it. All 7 malicious test fixtures are blocked.
 
-v0.1.1 is the audit after two independent reviews. The first found three bypasses: download-and-run
+v0.2.0 is the audit after two independent reviews. The first found three bypasses: download-and-run
 in `SKILL.md` prose, exfiltration split across two scripts behind generic description words, and
 instructions to the agent hidden in the frontmatter `name`. The second ran four rounds and wrote 31
 inert malicious skills and phrasings against the rules: among them a report cap that let five

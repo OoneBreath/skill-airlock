@@ -16,6 +16,16 @@ The most useful contributions right now are:
    skill in the default sources) so a new rule doesn't BLOCK well-known legitimate skills.
    Fixture skill files are named `SKILL.fixture.md` so no installer mistakes them for real skills.
 4. Update `CHANGELOG.md` for user-visible changes.
+5. CI runs the tests on every push to `main` or `dev` and every PR (`.github/workflows/test.yml`); a red run
+   doesn't merge.
+
+## Releases
+
+- `main` only moves by merging a branch whose CI is green.
+- A release is a version bump in `.claude-plugin/plugin.json`, `skills/skill-airlock/SKILL.md`,
+  `skills/skill-airlock/airlock` and the README badge, a `CHANGELOG.md` entry, and a `vX.Y.Z` tag
+  with a GitHub Release.
+- Version numbers only go up. Work in progress between releases stays on branches, untagged.
 
 ## License
 
