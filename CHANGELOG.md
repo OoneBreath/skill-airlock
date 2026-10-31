@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.1.5: six bypasses from a third review
+
+A third review wrote 8 more inert malicious skills against v0.1.4. One got BLOCK; of the other seven,
+five are now BLOCK, one is REVIEW by design (remote instructions) and one is left as REVIEW
+(string building, see Limits).
+
+- **"configurable settings" still excused agent config.** v0.1.4 removed "skill" from the words that
+  declare configuration work, but "settings", "config" or "plugins" in a description still dropped a
+  script that adds a `SessionStart` hook to `~/.claude/settings.json` to REVIEW. Writing the agent's
+  settings, hooks or MCP config from script code is now HIGH whatever the description says. Mentions
+  in documentation still drop a level, so skills that teach hook configuration are unchanged.
+- **Files `SKILL.md` runs are scripts.** Whether a file was a script depended on its extension or a
+  shebang, so `bash scripts/data.txt` or `bash scripts/a` dodged the script checks: a NUL byte made the
+  file a skipped "binary", padding past 2 MB was only MEDIUM, and exfiltration split across two
+  extensionless files was never put together. Any file inside the skill that `SKILL.md` tells the agent
+  to run (`bash|sh|python|node|ruby|perl|pwsh|source|uv run <path>` or `./<path>`) is now a script.
+- **"Read this URL and follow it."** `remote-instructions` needed a fetch verb. A URL near "read",
+  "open" or "visit" together with "follow / apply / execute … steps / instructions / it" now counts as
+  instructions fetched at run time (REVIEW). The same "follow" wording also marks a fetched URL as
+  instructions rather than reference material.
+- **The whole environment as a request body.** `json=dict(os.environ)`, `data=os.environ` and
+  `body: process.env` are now `env-dump`, so with a network call on the same line they are
+  `exfil-pattern`. `env=dict(os.environ, …)` for subprocesses is not matched.
+- A Markdown link to `./reference/….md` is not "a file `SKILL.md` runs" (caught in review of the fix,
+  before release: it made reference docs count as scripts).
+- Calibration on the 62 public skills is unchanged: 1 BLOCK, 24 REVIEW, 37 CLEAN/OK, with the same
+  findings skill by skill. 32 tests (19 subtests).
+
 ## 0.1.4: twelve bypasses from a second independent review
 
 A second independent review wrote 12 inert malicious skills against v0.1.3. None got BLOCK. All 12

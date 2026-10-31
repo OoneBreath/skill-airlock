@@ -33,6 +33,15 @@ FETCH_VERB = re.compile(r"\b(fetch\w*|download\w*|retriev\w*|pull(s|ed|ing)?|loa
 _NOUN = r"(guidelines?|rules?|instructions?|prompts?|checklists?|polic(y|ies)|playbooks?)"
 FETCHES_INSTRUCTIONS = re.compile(r"\b(fetch\w*|download\w*|retriev\w*|load\w*|pull\w*|grab\w*|webfetch)\b(\W+\w+){0,4}?\W+" + _NOUN + r"\b|"
                                   r"\b" + _NOUN + r"\W+(in|from)\W+the\W+fetched\b", re.IGNORECASE)
+# "Read <url> and follow every step": no fetch verb, but the URL is still the instructions.
+READ_VERB = re.compile(r"\b(read|open|visit|go\s+to|navigate\s+to|check|consult|load)\b", re.IGNORECASE)
+FOLLOWS = re.compile(r"\b(follow|obey|apply|execute|carry\s+out|comply\s+with|do\s+what)\b(\W+\w+){0,4}?\W+"
+                     r"(steps?|instructions?|rules?|guidelines?|directions?|commands?|it|them|everything|whatever)\b",
+                     re.IGNORECASE)
+# Files SKILL.md tells the agent to run ("bash scripts/setup", "python3 tools/x.txt", "./run"): scripts whatever
+# their extension, so a .txt or extensionless file can't dodge the script checks.
+RUN_REF = re.compile(r"(?:^|[\s`\"'(;&|])(?:(?:ba|z|da|k)?sh|source|python3?|node|deno|bun|ruby|perl|php|pwsh|powershell|"
+                     r"uv\s+run)\s+(?:-\S+\s+)*[\"']?((?:\./)?[\w.-]+(?:/[\w.-]+)*)|(?:^|[\s`\"';&|])\./([\w.-]+(?:/[\w.-]+)*)")
 INSTRUCTION_FILE = re.compile(r"/(command|skill|agents?|claude|prompts?|rules|guidelines|instructions)[\w-]*\.md\b", re.IGNORECASE)
 BENIGN_DOTFILES = {".gitignore", ".gitkeep", ".gitattributes", ".editorconfig", ".prettierrc"}
 
@@ -83,7 +92,9 @@ LINE_RULES = [
     ("secret-path", MEDIUM, r"[\"'](~|\$HOME)?/?\.[\"']\s*\+?\s*[\"']|[\"']~/\.?[\"']\s*\+", "hidden path built from string pieces"),
     ("dotenv", MEDIUM, r"(?<![\w./\\-])\.env(?![\w.-])|(?<![\w./\\-])\.env\.(local|production|prod)\b", ".env file"),
     ("env-dump", MEDIUM, r"\bprintenv\s*($|[|;>&)])|(^|[;&|(`]\s*|\$\(\s*)env\s*\||JSON\.stringify\(\s*process\.env\s*\)|"
-                         r"json\.dumps?\(\s*(dict\()?\s*os\.environ|print\(\s*(dict\()?\s*os\.environ\s*\)?\s*\)",
+                         r"json\.dumps?\(\s*(dict\()?\s*os\.environ|print\(\s*(dict\()?\s*os\.environ\s*\)?\s*\)|"
+                         # the whole environment as a request body: json=dict(os.environ), body: process.env
+                         r"\b(json|data|params|body|payload|files)\s*[=:]\s*(dict\(\s*)?(os\.environ|process\.env)\b(?!\s*[\[.(]|\.get)",
      "dumps all environment variables"),
     ("credential-store", HIGH, r"\bsecurity\s+find-(generic|internet)-password\b|Login Data|Cookies\.binarycookies|"
                                r"\bkeyring\.get_password\b", "reads a password or cookie store"),
@@ -300,10 +311,30 @@ def _remote_fetches(text):
     out = []
     for i, line in enumerate(lines):
         for m in REMOTE_URL.finditer(line):
-            verb_lines = [l for l in lines[max(0, i - 3):i + 4] if FETCH_VERB.search(l)]
+            window = lines[max(0, i - 3):i + 4]
+            verb_lines = [l for l in window if FETCH_VERB.search(l)]
+            follows = any(FOLLOWS.search(l) for l in window)
             if verb_lines:
-                instr = bool(INSTRUCTION_FILE.search(m.group(0))) or any(FETCHES_INSTRUCTIONS.search(l) for l in [line] + verb_lines)
+                instr = (bool(INSTRUCTION_FILE.search(m.group(0))) or follows
+                         or any(FETCHES_INSTRUCTIONS.search(l) for l in [line] + verb_lines))
                 out.append((i + 1, m.group(0), instr))
+            elif follows and any(READ_VERB.search(l) for l in window):
+                out.append((i + 1, m.group(0), True))
+    return out
+
+
+def _invoked(text, root):
+    """Relative paths of files inside the skill that SKILL.md tells the agent to run."""
+    real_root = os.path.realpath(root)
+    out = set()
+    for m in RUN_REF.finditer(text):
+        ref = (m.group(1) or m.group(2) or "").rstrip(".")
+        # A bare ./path to Markdown is a link to read ("see ./reference/guide.md"), not a file to run.
+        if not ref or (m.group(2) and ref.lower().endswith((".md", ".markdown"))):
+            continue
+        full = os.path.realpath(os.path.join(root, ref))
+        if full.startswith(real_root + os.sep) and os.path.isfile(full):
+            out.add(os.path.relpath(full, real_root))
     return out
 
 
@@ -339,6 +370,7 @@ def audit(root):
     meta, body_start, skill_text = _read_meta(root)
     desc = (meta or {}).get("description", "")
     rules_by_file = {}
+    invoked = _invoked(skill_text, root) if skill_text else set()
 
     def add(sev, rule, rel, line, excerpt, note):
         key = (rule, rel, sev)
@@ -374,12 +406,14 @@ def audit(root):
             size = os.path.getsize(full)
             ext = os.path.splitext(name)[1].lower()
             # Scripts and Markdown are what runs or instructs; one padded past the scan limit is not normal.
-            textual = ext in SCRIPT_EXT or ext in (".md", ".markdown") or name == "SKILL.md"
+            run_by_skill = rel in invoked
+            textual = ext in SCRIPT_EXT or ext in (".md", ".markdown") or name == "SKILL.md" or run_by_skill
             if size > MAX_BYTES:
                 with open(full, "rb") as fh:
                     textual = textual or fh.read(2) == b"#!"
                 add(HIGH if textual else MEDIUM, "large-file", rel, 0, f"{size} bytes",
-                    "script or Markdown too large to scan" if textual else "too large to scan; review by hand")
+                    ("SKILL.md runs this file, and it is too large to scan" if run_by_skill else
+                     "script or Markdown too large to scan") if textual else "too large to scan; review by hand")
                 continue
             with open(full, "rb") as fh:
                 data = fh.read()
@@ -396,11 +430,12 @@ def audit(root):
                     "NUL byte in a script or Markdown file, which hides it from text tools; scanned anyway")
                 data = data.replace(b"\x00", b"")
             text = data.decode("utf-8", errors="replace")
-            is_script = _is_script(name, text)
+            # A file SKILL.md runs is a script, whatever its name: `bash scripts/data.txt` runs data.txt.
+            is_script = _is_script(name, text) or run_by_skill
             if is_script:
                 scripts.append(rel)
             file_rules = {}
-            is_md = ext in (".md", ".markdown")
+            is_md = ext in (".md", ".markdown") and not run_by_skill
             is_skill_md = rel == "SKILL.md"
             in_fence = False
             for no, line in _logical_lines(text, is_md):
@@ -439,7 +474,10 @@ def audit(root):
                         sev = DOWNGRADE[sev]
                     elif rule == "runtime-install" and is_script:
                         sev, note = MEDIUM, "script installs packages at run time; that code was never audited (check the name)"
-                    if _declared(rule, desc):
+                    # Writing the agent's settings, hooks or MCP config from real script code is never excused by
+                    # the description: "configurable settings" is two words an attacker adds for free.
+                    excusable = not (rule == "agent-config" and is_script and not descriptive)
+                    if excusable and _declared(rule, desc):
                         sev, note = DOWNGRADE[sev], note + " (declared in the description)"
                     add(sev, rule, rel, no, scan, note)
                     if not descriptive:

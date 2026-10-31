@@ -20,7 +20,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import _audit  # noqa: E402
 
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 STATE = Path(os.environ.get("AIRLOCK_HOME") or Path.home() / ".skill-airlock")
 AGENTS = {"claude": Path.home() / ".claude" / "skills", "agents": Path.home() / ".agents" / "skills"}
 TRANSCRIPTS = Path.home() / ".claude" / "projects"

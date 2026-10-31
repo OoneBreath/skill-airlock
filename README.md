@@ -5,7 +5,7 @@
 Give your agent a task. It finds suitable skills in a local index, copies them into quarantine and
 shows you what a static audit found, asks you, uses them, and lets them go when the job is done.
 
-[![Version](https://img.shields.io/badge/version-0.1.4%20alpha-orange)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.5%20alpha-orange)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Runtime deps](https://img.shields.io/badge/runtime%20deps-zero-success)](#install)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-success)](#privacy)
@@ -129,7 +129,7 @@ a sanitised excerpt.
 | Destruction | `rm -rf ~`, `mkfs`, `dd` to devices, fork bombs |
 | Prompt injection | "ignore previous instructions", "don't tell the user", "don't ask for permission", claims that the user already approved the skill, telling the agent to override Airlock with `--force`, permission-bypass flags, fake system tags, role overrides |
 | Hidden content | zero-width characters, bidirectional controls, Unicode tag characters (decoded and shown), instructions in HTML comments |
-| Remote instructions | `SKILL.md` tells the agent to fetch its rules or instructions from a URL at run time: what the agent will follow was never audited and can change (REVIEW). Fetching reference docs is noted as low |
+| Remote instructions | `SKILL.md` tells the agent to fetch its rules or instructions from a URL at run time, or to read a URL and follow it: what the agent will follow was never audited and can change (REVIEW). Fetching reference docs is noted as low |
 | Declared vs actual | scripts use the network or credentials while the description never says so |
 | Hygiene | invalid frontmatter names, symlinks out of the skill, binaries, NUL bytes in scripts or Markdown, files too large to scan, oversized `SKILL.md`, missing or vague descriptions |
 
@@ -146,11 +146,15 @@ Severity depends on context, so documentation doesn't drown out real problems:
   anything, and nothing excuses secrets plus network.
 - The most severe finding of each rule is always in the report; repeats are capped per severity.
 - Declared-vs-actual and exfiltration checks look at real script code, not comments.
+- A file `SKILL.md` tells the agent to run (`bash scripts/data.txt`, `./setup`) is a script, whatever
+  its name or extension.
+- A script that writes the agent's settings, hooks or MCP config is HIGH whatever the description
+  says; only mentions in documentation drop a level.
 
 `airlock find` never echoes text aimed at the agent: a description that matches an instruction rule,
 or an invalid frontmatter name, is withheld with a pointer to `airlock inspect`.
 
-**Calibration (v0.1.4):** across all 62 skills in the three public catalogs above: 1 BLOCK, 24 REVIEW
+**Calibration (v0.1.5):** across all 62 skills in the three public catalogs above: 1 BLOCK, 24 REVIEW
 (skills that really configure hooks, settings and MCP servers, call the network, tell the agent to
 use `sudo`, install packages from their scripts, or fetch their instructions at run time), 37 CLEAN or OK. The one BLOCK is a `SKILL.md` that tells the agent to run the
 Homebrew installer with `curl … | bash`: a real download-and-run instruction, blocked by design, and
@@ -161,7 +165,9 @@ exfiltration split across two scripts behind generic description words, and inst
 agent hidden in the frontmatter `name`. Each is now a test fixture. v0.1.4 closed twelve more from a
 second independent review: among them, a report cap that let five commented-out lines hide the live
 one, and the word "skill" in a description excusing a script that adds a hook to the agent's settings.
-Each is now a test case. The full record, skill by skill, is in [docs/calibration.md](docs/calibration.md).
+Each is now a test case. v0.1.5 closed six from a third review: "configurable settings" in a description
+still excused a hook-writing script, and a `.txt` or extensionless file run by `SKILL.md` dodged the
+script checks. The full record, skill by skill, is in [docs/calibration.md](docs/calibration.md).
 
 **Limits.** This is a static filter. A clean report means "nothing known was found", not "safe".
 Pattern rules can always be evaded by code written to dodge them, so treat REVIEW as "read it
