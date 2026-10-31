@@ -44,6 +44,11 @@ FOLLOWS = re.compile(r"\b(follow|obey|apply|execute|carry\s+out|comply\s+with|do
 # their extension, so a .txt or extensionless file can't dodge the script checks.
 RUN_REF = re.compile(r"(?:^|[\s`\"'(;&|])(?:(?:ba|z|da|k)?sh|source|python3?|node|deno|bun|ruby|perl|php|pwsh|powershell|"
                      r"uv\s+run)\s+(?:-\S+\s+)*[\"']?((?:\./)?[\w.-]+(?:/[\w.-]+)*)|(?:^|[\s`\"';&|])\./([\w.-]+(?:/[\w.-]+)*)")
+# Raw text is the shape instructions are served in, whatever the words around the link: Markdown, plain text
+# or YAML, a /raw/ path, a gist or a paste site. An HTML docs page, a JSON schema or a script is not.
+RAW_TEXT_URL = re.compile(r"\.(md|markdown|mdx|txt|text|ya?ml|rst|prompt)(?=$|[?#])|/raw/|"
+                          r"//(gist\.githubusercontent\.com|gist\.github\.com|pastebin\.com|rentry\.(co|org)|"
+                          r"hastebin\.com|paste\.ee|dpaste\.(com|org))/", re.IGNORECASE)
 INSTRUCTION_FILE = re.compile(r"/(command|skill|agents?|claude|prompts?|rules|guidelines|instructions)[\w-]*\.md\b", re.IGNORECASE)
 BENIGN_DOTFILES = {".gitignore", ".gitkeep", ".gitattributes", ".editorconfig", ".prettierrc"}
 
@@ -308,22 +313,26 @@ def _read_meta(root):
 
 
 def _remote_fetches(text):
-    """(line, url, is_instructions) for each URL the SKILL.md tells the agent to fetch (verb within 3 lines)."""
+    """(line, url, kind) for every URL in SKILL.md: the agent may open any of them. kind is "raw" for raw text,
+    "words" when the wording around it makes it instructions, None for reference material."""
     lines = text.splitlines()
     out = []
     for i, line in enumerate(lines):
         for m in REMOTE_URL.finditer(line):
+            url = m.group(0).rstrip(".,;:!?*]")
+            if RAW_TEXT_URL.search(url):
+                out.append((i + 1, url, "raw"))
+                continue
             window = lines[max(0, i - 3):i + 4]
             verb_lines = [l for l in window if FETCH_VERB.search(l)]
             follows = any(FOLLOWS.search(l) for l in window)
             # "The checklist lives at <url>: follow it." An order to obey, on the URL's line or the next, is enough.
             follows_here = any(FOLLOWS.search(l) for l in lines[i:i + 2])
-            if verb_lines:
-                instr = (bool(INSTRUCTION_FILE.search(m.group(0))) or follows
-                         or any(FETCHES_INSTRUCTIONS.search(l) for l in [line] + verb_lines))
-                out.append((i + 1, m.group(0), instr))
-            elif follows_here or (follows and any(READ_VERB.search(l) for l in window)):
-                out.append((i + 1, m.group(0), True))
+            # The word heuristics are an extra signal for pages that aren't raw text.
+            words = (follows_here or (follows and any(READ_VERB.search(l) for l in window))
+                     or bool(verb_lines) and (bool(INSTRUCTION_FILE.search(url)) or follows
+                                              or any(FETCHES_INSTRUCTIONS.search(l) for l in [line] + verb_lines)))
+            out.append((i + 1, url, "words" if words else None))
     return out
 
 
@@ -516,12 +525,16 @@ def audit(root):
             add(MEDIUM, "frontmatter", "SKILL.md", 1, "name/description missing", "frontmatter lacks name or description")
         elif len(meta["description"]) < 40:
             add(LOW, "vague-description", "SKILL.md", 1, meta["description"], "description too short to judge what it does")
-        for no, url, is_instructions in _remote_fetches(text):
-            if is_instructions:
+        for no, url, kind in _remote_fetches(text):
+            if kind == "raw":
+                add(MEDIUM, "remote-instructions", "SKILL.md", no, url,
+                    "points the agent at raw text (Markdown, plain text, YAML, a gist or a paste) it reads as-is; "
+                    "never audited, and can change")
+            elif kind == "words":
                 add(MEDIUM, "remote-instructions", "SKILL.md", no, url,
                     "tells the agent to fetch its instructions at run time; what it follows was never audited and can change")
             else:
-                add(LOW, "remote-content", "SKILL.md", no, url, "loads reference material from the network at run time")
+                add(LOW, "remote-content", "SKILL.md", no, url, "links to a page the agent may open; its content was never audited")
         if meta.get("name") and not SAFE_NAME.match(meta["name"]):
             add(MEDIUM, "unsafe-name", "SKILL.md", 1, meta["name"],
                 "frontmatter name is not a valid skill name (may carry text aimed at the agent); cannot be installed")

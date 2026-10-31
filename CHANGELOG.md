@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.7: remote instructions by shape, not by wording
+
+The same review found 7 more phrasings of "take your instructions from this URL" that v0.1.6 missed
+("Your instructions: <url>", "Do whatever <url> says", a runbook link with "do them in order", a Polish
+sentence, …), and advised to stop extending word lists. Done:
+
+- A URL to raw text is `remote-instructions` (MEDIUM) whatever the words around it: Markdown, plain
+  text, YAML or reStructuredText, a `/raw/` path, a gist or a paste site. That is the shape
+  instructions are served in. An HTML docs page, a JSON schema or a script is not.
+- Every other URL in `SKILL.md` is at least `remote-content` (LOW): the agent may open any link.
+- The word heuristics stay as an extra signal for pages that aren't raw text, so "follow the steps
+  at <docs page>" is still REVIEW.
+- Measured first: 7 of the 62 public skills link raw text from `SKILL.md`. Two were already REVIEW
+  for this rule, three for other reasons, one is the deliberate BLOCK, and the seventh links a JSON
+  catalogue (data, not instructions). Verdicts unchanged: 1 BLOCK, 24 REVIEW, 37 CLEAN/OK; two
+  skills move from CLEAN to OK because their links are now noted. 33 tests (30 subtests).
+
 ## 0.1.6: remote instructions without a fetch verb
 
 The same review checked v0.1.5 and found two phrasings `remote-instructions` still passed as CLEAN:
