@@ -60,7 +60,8 @@ rule tables don't flag themselves. A different file can't borrow that exemption.
 
 **Calibration.** Changes to rules are checked against the full public catalogs and the malicious
 fixtures in `tests/fixtures/` (all must BLOCK). v0.1.0: 0 BLOCK, 16 REVIEW, 46 CLEAN/OK, 4 malicious fixtures (+1 clean).
-v0.1.1: 1 BLOCK (Homebrew `curl | bash` in a SKILL.md, by design), 21 REVIEW, 40 CLEAN/OK, 7 fixtures.
+v0.1.1: 1 BLOCK (Homebrew `curl | bash` in a SKILL.md, by design), 24 REVIEW, 37 CLEAN/OK, 7 fixtures plus
+the probes of two independent reviews as test cases.
 A rule change that blocks a well-known legitimate skill needs a reason. The full record, including
 the 18 blocks of the first rule set and where each bypass came from, is in [calibration.md](calibration.md).
 

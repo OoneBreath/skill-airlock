@@ -40,7 +40,7 @@ if os.path.exists(path):
         print("  ! settings.json is not valid JSON; left untouched, hook not added")
         sys.exit(0)
 hooks = cfg.setdefault("hooks", {}).setdefault("SessionStart", [])
-def ours(c):  # matches the quoted form and the unquoted one written by v0.1.0-v0.1.3
+def ours(c):  # matches the quoted form and the unquoted one written by v0.1.0
     return "airlock" in c and "vent --expired" in c
 if any(ours(h.get("command", "")) for e in hooks for h in e.get("hooks", [])):
     print("  ✓ SessionStart hook already registered; settings.json unchanged")
