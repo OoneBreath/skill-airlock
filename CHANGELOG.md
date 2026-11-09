@@ -2,6 +2,25 @@
 
 ## 0.3.0 (unreleased)
 
+- **Skills inside plugins.** A plugin's authority lives in its hooks and MCP servers, not in the skill's
+  directory. The audit now reads them too.
+  - **Detection and quarantine.** `sync` records `plugin_root` for a skill under a
+    `.claude-plugin/plugin.json`, and `audit <dir>` finds it on its own. `inspect` copies the
+    plugin's manifest, `hooks/`, `.mcp.json` and the scripts hooks run into the quarantine
+    (`plugin/`), so they are audited, integrity-checked and can be pinned by `accept`.
+  - **Hooks.** Each hook command is a `plugin-hook` (MEDIUM). Hook commands and hook scripts get the
+    line rules at full severity: secrets plus network is `exfil-pattern` HIGH.
+  - **MCP servers.** A remote server is `plugin-mcp-remote` (MEDIUM). A local one is
+    `plugin-mcp-local` (LOW) and its command is audited. Env and header NAMES are listed; values
+    are never read out.
+  - **Skill text.** A SKILL.md that relies on `mcp__…` tools or "the hook will…" gets
+    `plugin-dependency` (LOW).
+  - **Output.** It says: "This skill ships inside plugin X. Docking the skill alone does not install
+    the plugin's hooks or MCP servers; installing the plugin does." That is true: `dock` copies the
+    skill directory only.
+  - **Calibration.** 6 of 62 catalog verdicts changed, all in claude-plugins-official, listed in
+    [docs/calibration.md](docs/calibration.md).
+  - **Tests.** 4 plugin fixtures (`tests/plugin_fixtures/`) and 7 tests.
 - **Semantic review by a fresh subagent.** airlock prepares the review and checks the answer; it
   never calls a model.
   - **`airlock review-pack <skill>`** writes `pack.md` and `questions.json` into the quarantine.

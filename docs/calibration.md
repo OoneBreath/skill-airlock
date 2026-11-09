@@ -17,6 +17,7 @@ and `vercel-labs/agent-skills`, mirrored on 30 October 2026 (claude-plugins-offi
 | Review 2, round 2 (8 probes) · working v0.1.5 | 1 | 24 | 37 | + 5 / 6 (1 REVIEW by design) |
 | Review 2, round 3 (4 phrasings) · working v0.1.6 | 1 | 24 | 37 | + 2 REVIEW cases |
 | **v0.2.0**, after review 2, round 4 (7 phrasings) · working v0.1.7 | 1 | 24 | 37 | + 9 REVIEW phrasings |
+| 0.3.0 (unreleased): plugin hooks, MCP servers, manifest | 1 | 27 | 34 | 7 / 7 + 4 plugin fixtures |
 
 v0.1.0 shipped 5 fixtures: 4 malicious (`exfil`, `hidden`, `obfuscated`, `persistence`) and 1 clean.
 v0.2.0 adds 3 malicious fixtures (`prose-pipe`, `split-exfil`, `name-injection`), one REVIEW fixture
@@ -200,3 +201,27 @@ LOW. The 9 phrasings (the review's 7, a gist link, and an SDK README loaded with
 in `test_remote_raw_text_is_review_whatever_the_wording`; all 9 fail on the round-3 rules. Still REVIEW by
 wording: "follow the installation steps at <docs page>", which is defensible but the most likely
 false positive once someone adds their own catalog.
+
+## 0.3.0: skills inside plugins
+
+Until 0.3.0 the audit read only a skill's own directory. For a skill shipped inside a plugin, the
+plugin's real authority — `hooks/hooks.json`, `.mcp.json`, `mcpServers` in `.claude-plugin/plugin.json`,
+and the scripts hooks run — was never looked at. Now it is (rules `plugin-hook` MEDIUM,
+`plugin-mcp-remote` MEDIUM, `plugin-mcp-local` LOW, `plugin-dependency` LOW, plus the usual line rules
+over hook commands and hook scripts at full severity). Re-run on 2026-11-09 against the local mirrors
+from 2026-10-28; 6 of 62 verdicts changed, all in `claude-plugins-official`, all expected:
+
+| Skill | Plugin | Before | After | Why |
+|---|---|---|---|---|
+| `access` | discord | CLEAN | OK | the plugin starts a local MCP server (`plugin-mcp-local`, LOW) |
+| `external_plugins-imessage-skills-access` | imessage | CLEAN | OK | same |
+| `external_plugins-telegram-skills-access` | telegram | CLEAN | OK | same |
+| `claude-security` | claude-security | OK | REVIEW | the plugin installs hooks (`plugin-hook`) |
+| `example-command` | example-plugin | CLEAN | REVIEW | the plugin uses a remote MCP server (`plugin-mcp-remote`) |
+| `example-skill` | example-plugin | CLEAN | REVIEW | same |
+
+Totals: 1 BLOCK · 27 REVIEW · 34 OK/CLEAN (was 1 · 24 · 37). A REVIEW for a plugin with hooks is the
+point: installing the plugin runs code in every session, whatever the skill's own files say. The output
+also says what docking the skill alone does and doesn't install. That was checked against `dock`, which
+copies the skill directory only.
+

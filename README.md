@@ -169,6 +169,13 @@ a hook to the agent's settings, and a `.txt` file run by `SKILL.md` dodging the 
 now a test case. The full record, probe by probe and skill by skill, is in
 [docs/calibration.md](docs/calibration.md).
 
+**Skills inside plugins.** A plugin's authority isn't in the skill's folder. It lives in the plugin's
+hooks, which run in every session, and in its MCP servers. For a skill shipped inside a plugin, the audit
+reads them too: each hook is a `plugin-hook` (MEDIUM), a remote MCP server is `plugin-mcp-remote`
+(MEDIUM), and hook commands and the scripts they run get the usual rules at full severity. Env and header
+values are never printed, only their names. The report says it plainly: docking the skill alone doesn't
+install the plugin's hooks or MCP servers; installing the plugin does.
+
 ### Security tools that trip the audit
 
 A tool whose job is security reads what an attacker would read. [server-audit](https://github.com/OoneBreath/server-audit)
