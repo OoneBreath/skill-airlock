@@ -374,8 +374,35 @@ def _is_script(path, text):
     return ext in SCRIPT_EXT or text.startswith("#!")
 
 
+SCHEMA_VERSION = 1
+UNTRUSTED_FIELDS = ["name", "description", "findings[].excerpt", "findings[].message"]
+
+
+def finding_id(rule, rel, matched, occurrence=0):
+    """Stable id: rule + file + the matched text with whitespace normalised, no line number.
+
+    An accepted finding survives lines moving and stops matching when the line's content
+    changes. Identical lines in one file get different ids through their occurrence number.
+    """
+    norm = " ".join(str(matched).split())
+    key = "\0".join([rule, rel, norm] + ([str(occurrence)] if occurrence else []))
+    return hashlib.sha256(key.encode("utf-8", "replace")).hexdigest()[:12]
+
+
+def _context_of(rel):
+    if rel == "SKILL.md":
+        return "skill_md"
+    return "reference_md" if rel.lower().endswith((".md", ".markdown")) else "code"
+
+
+def tree_digest(hashes):
+    """One sha256 over a {relative path: file hash} map (airlock's tree_hashes())."""
+    blob = "\n".join(f"{k}\0{hashes[k]}" for k in sorted(hashes))
+    return hashlib.sha256(blob.encode("utf-8", "replace")).hexdigest()
+
+
 def audit(root):
-    """Audit one skill directory. Returns a report dict (see render())."""
+    """Audit one skill directory. Returns a report dict (see render() and report_json())."""
     root = os.path.abspath(root)
     real_root = os.path.realpath(root)
     findings, files, scripts = [], [], []
@@ -385,13 +412,21 @@ def audit(root):
     rules_by_file = {}
     invoked = _invoked(skill_text, root) if skill_text else set()
 
-    def add(sev, rule, rel, line, excerpt, note):
+    all_findings, occurrences = [], {}
+
+    def add(sev, rule, rel, line, excerpt, note, context=None, declared=False, involved=None):
         key = (rule, rel, sev)
         counts_per_rule[key] = counts_per_rule.get(key, 0) + 1
-        if counts_per_rule[key] > MAX_PER_RULE_PER_FILE:
-            return
-        findings.append({"severity": sev, "rule": rule, "file": rel, "line": line,
-                         "excerpt": sanitize(excerpt), "note": note})
+        norm = " ".join(str(excerpt).split())
+        occ = occurrences.get((rule, rel, norm), 0)
+        occurrences[(rule, rel, norm)] = occ + 1
+        f = {"severity": sev, "rule": rule, "file": rel, "line": line, "excerpt": sanitize(excerpt), "note": note,
+             "id": finding_id(rule, rel, norm, occ), "context": context or _context_of(rel),
+             "declared": bool(declared), "files_involved": sorted(set(involved or [rel])),
+             "repeat": counts_per_rule[key] > MAX_PER_RULE_PER_FILE}
+        all_findings.append(f)   # JSON lists every finding; the text report caps repeats per rule and file
+        if not f["repeat"]:
+            findings.append(f)
 
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         for d in list(dirnames):
@@ -455,19 +490,24 @@ def audit(root):
                 if no == 1 and line.startswith("\ufeff"):
                     line = line[1:]
                 scan = line[:MAX_LINE]
+                ctx = ("skill_md" if is_skill_md else "fenced" if in_fence else "reference_md") if is_md else \
+                      ("comment" if _is_comment(scan) else "code")
                 zw, bidi, tagged = _hidden_chars(scan)
                 if zw:
                     fence = FENCE_ESCAPE.match(scan)
                     hidden = sum(1 for c in scan if ord(c) in ZERO_WIDTH)
                     if fence and not is_skill_md and hidden == sum(1 for c in fence.group(1) if ord(c) in ZERO_WIDTH):
-                        add(LOW, "hidden-unicode", rel, no, scan, "zero-width character escaping a code fence (template idiom)")
+                        add(LOW, "hidden-unicode", rel, no, scan, "zero-width character escaping a code fence (template idiom)",
+                            context=ctx)
                     else:
                         add(HIGH, "hidden-unicode", rel, no, scan,
-                            "invisible characters: " + ", ".join(f"U+{c:04X}" for c in zw))
+                            "invisible characters: " + ", ".join(f"U+{c:04X}" for c in zw), context=ctx)
                 if bidi:
-                    add(HIGH, "bidi-control", rel, no, scan, "bidirectional controls can make text read differently than it runs")
+                    add(HIGH, "bidi-control", rel, no, scan, "bidirectional controls can make text read differently than it runs",
+                        context=ctx)
                 if tagged:
-                    add(HIGH, "unicode-tags", rel, no, "hidden text decoded: " + tagged, "invisible Unicode tag characters carry hidden text")
+                    add(HIGH, "unicode-tags", rel, no, "hidden text decoded: " + tagged, "invisible Unicode tag characters carry hidden text",
+                        context=ctx)
                 if is_md and scan.lstrip().startswith(("```", "~~~")):
                     in_fence = not in_fence
                     continue
@@ -490,15 +530,16 @@ def audit(root):
                     # Writing the agent's settings, hooks or MCP config from real script code is never excused by
                     # the description: "configurable settings" is two words an attacker adds for free.
                     excusable = not (rule == "agent-config" and is_script and not descriptive)
-                    if excusable and _declared(rule, desc):
+                    declared = excusable and _declared(rule, desc)
+                    if declared:
                         sev, note = DOWNGRADE[sev], note + " (declared in the description)"
-                    add(sev, rule, rel, no, scan, note)
+                    add(sev, rule, rel, no, scan, note, context=ctx, declared=declared)
                     if not descriptive:
                         line_rules.add(rule)
                     if is_script and not _is_comment(scan):
                         file_rules.setdefault(rule, no)
                 if line_rules & NETWORK_RULES and line_rules & SECRET_RULES:
-                    add(HIGH, "exfil-pattern", rel, no, scan, "reads secrets and sends them in the same command")
+                    add(HIGH, "exfil-pattern", rel, no, scan, "reads secrets and sends them in the same command", context=ctx)
             if ext in (".md", ".markdown"):
                 for m in re.finditer(r"<!--(.*?)-->", text, re.S):
                     body = " ".join(m.group(1).split())
@@ -547,7 +588,7 @@ def audit(root):
         # Split across scripts so no single file looks like exfiltration. Declared words don't excuse this.
         first = min(rules_by_file[sec_files[0]][r] for r in rules_by_file[sec_files[0]] if r in SECRET_RULES)
         add(HIGH, "exfil-pattern", sec_files[0], first, f"secrets in {', '.join(sec_files)}; network in {', '.join(net_files)}",
-            "reads secrets in one script and uses the network in another")
+            "reads secrets in one script and uses the network in another", involved=sec_files + net_files)
     # Declared-vs-actual checks look at real script code only: comments and docs don't run.
     def first_hit(files, ruleset):
         f = files[0]
@@ -556,22 +597,54 @@ def audit(root):
     if net_files and not NET_WORDS.search(desc):
         f, line = first_hit(net_files, NETWORK_RULES)
         add(MEDIUM, "mismatch-network", f, line, desc or "(no description)",
-            "scripts use the network but the description never says so")
+            "scripts use the network but the description never says so", involved=net_files + ["SKILL.md"])
     if sec_files and not SECRET_WORDS.search(desc):
         f, line = first_hit(sec_files, SECRET_RULES)
         # Without a network channel in the scripts, touching a secret path is often protective
         # (a hook that blocks writes to .env); with one, it is the exfiltration shape.
         add(HIGH if net_files else MEDIUM, "mismatch-secrets", f, line, desc or "(no description)",
             "touches credentials but the description never mentions them"
-            + ("" if net_files else " (no network use found in scripts)"))
+            + ("" if net_files else " (no network use found in scripts)"), involved=sec_files + ["SKILL.md"])
 
     findings.sort(key=lambda f: (SEVERITIES.index(f["severity"]), f["file"], f["line"]))
+    all_findings.sort(key=lambda f: (SEVERITIES.index(f["severity"]), f["file"], f["line"]))
     counts = {s: sum(1 for f in findings if f["severity"] == s) for s in SEVERITIES}
     top = next((s for s in SEVERITIES if counts[s]), None)
     truncated = sum(max(0, n - MAX_PER_RULE_PER_FILE) for n in counts_per_rule.values())
     return {"root": root, "name": meta.get("name", ""), "description": desc, "files": files, "scripts": scripts,
-            "findings": findings, "counts": counts, "verdict": VERDICTS[top], "truncated": truncated,
+            "findings": findings, "all_findings": all_findings, "counts": counts, "verdict": VERDICTS[top],
+            "truncated": truncated,
             "desc_tokens": tokens(meta.get("name", "") + desc), "body_tokens": body_tokens}
+
+
+def report_json(report, version, skill_id=None, source=None, commit=None, tree_sha256=None, audited_at=None):
+    """The machine-readable audit report (docs/audit-schema.json). Text from the skill is sanitised."""
+    every = report.get("all_findings", report["findings"])
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "untrusted_fields": UNTRUSTED_FIELDS,
+        "airlock_version": version,
+        "audited_at": audited_at,
+        "skill_id": skill_id,
+        "source": source,
+        "commit": commit,
+        "tree_sha256": tree_sha256,
+        "name": sanitize(report["name"]),
+        "description": sanitize(report["description"], 2000),
+        "verdict": report["verdict"],
+        "counts": {s: sum(1 for f in every if f["severity"] == s) for s in SEVERITIES},
+        "files": report["files"],
+        "scripts": report["scripts"],
+        "tokens": {"session": report["desc_tokens"], "on_use": report["body_tokens"]},
+        "truncated": report["truncated"],
+        "not_scanned": [],
+        "findings": [{
+            "id": f["id"], "rule": f["rule"], "severity": f["severity"], "file": f["file"], "line": f["line"],
+            "message": sanitize(f["note"], 400), "excerpt": f["excerpt"], "context": f["context"],
+            "declared": f["declared"], "accepted": None, "files_involved": f["files_involved"],
+            "repeat": f["repeat"],
+        } for f in every],
+    }
 
 
 def render(report, title=None):

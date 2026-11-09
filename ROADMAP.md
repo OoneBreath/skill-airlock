@@ -27,6 +27,8 @@ Ordered by what makes the tool useful soonest. Versions are targets, not promise
 
 ## v0.3: keep it under control
 
+- [x] Machine-readable audit report: `inspect --json`, `audit --json`, [docs/audit-schema.json](docs/audit-schema.json),
+      stable finding ids (the base for `update`, accepted findings and the decision log)
 - [ ] `airlock update`: show the diff against the pinned commit and **what the audit says now that it
       didn't before** (e.g. "new network access in scripts/sync.sh"); ask before applying
 - [ ] Trust list and blocklist (authors, repos, specific commits). A skill with scripts from a source

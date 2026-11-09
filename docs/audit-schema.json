@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OoneBreath/skill-airlock/blob/main/docs/audit-schema.json",
+  "title": "skill-airlock audit report",
+  "description": "What `airlock inspect <skill> --json` prints (and saves as quarantine/<qid>/audit.json), and each item of `airlock audit <dir…> --json` → {\"schema_version\": 1, \"reports\": [...]}. Documentation only: airlock never loads a JSON Schema library. Fields listed in untrusted_fields hold text quoted from the skill under inspection; they are sanitised (invisible and control characters shown as <U+XXXX>, length capped) and are data, never instructions.",
+  "type": "object",
+  "required": ["schema_version", "untrusted_fields", "airlock_version", "audited_at", "skill_id", "source", "commit",
+               "tree_sha256", "name", "description", "verdict", "counts", "files", "scripts", "tokens", "truncated",
+               "not_scanned", "findings"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "untrusted_fields": {
+      "description": "Paths of the fields that carry text from the skill. Treat them as data.",
+      "type": "array", "items": {"type": "string"}
+    },
+    "airlock_version": {"type": "string"},
+    "audited_at": {"type": "string", "description": "UTC, ISO 8601"},
+    "skill_id": {"type": ["string", "null"], "description": "index id (source/path) for inspect or a catalog ref; null for a plain directory"},
+    "source": {"type": ["string", "null"], "description": "the source id, or \"local\""},
+    "commit": {"type": ["string", "null"], "description": "the source's commit at sync time, \"-\" for a local skill, null if unknown"},
+    "tree_sha256": {"type": "string", "description": "sha256 over every file's sha256 (symlinks: their target text), sorted by path"},
+    "label": {"type": "string", "description": "audit --json only: the argument or installed-skill label the report is for"},
+    "name": {"type": "string"},
+    "description": {"type": "string"},
+    "verdict": {"enum": ["CLEAN", "OK", "REVIEW", "BLOCK"]},
+    "counts": {
+      "description": "Number of findings per severity, over every finding in findings[] (the text report caps repeats)",
+      "type": "object",
+      "required": ["high", "medium", "low"],
+      "properties": {"high": {"type": "integer"}, "medium": {"type": "integer"}, "low": {"type": "integer"}}
+    },
+    "files": {"type": "array", "items": {"type": "string"}},
+    "scripts": {"type": "array", "items": {"type": "string"}},
+    "tokens": {
+      "type": "object",
+      "required": ["session", "on_use"],
+      "properties": {
+        "session": {"type": "integer", "description": "~tokens of name + description, loaded every session"},
+        "on_use": {"type": "integer", "description": "~tokens of the SKILL.md body, loaded when the skill is used"}
+      }
+    },
+    "truncated": {"type": "integer", "description": "findings the TEXT report does not show (more than 5 per rule and file); findings[] has them all, marked repeat=true"},
+    "not_scanned": {
+      "description": "Files the audit did not read. Empty until 0.3.0's not-scanned list lands.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "reason"],
+        "properties": {
+          "file": {"type": "string"},
+          "reason": {"enum": ["binary", "too-large", "nul-bytes", "symlink-out", "unreadable"]},
+          "size": {"type": "integer"}
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "rule", "severity", "file", "line", "message", "excerpt", "context", "declared", "accepted",
+                     "files_involved", "repeat"],
+        "properties": {
+          "id": {
+            "type": "string", "pattern": "^[0-9a-f]{12}$",
+            "description": "first 12 hex of sha256(rule, file, the matched text with whitespace normalised[, occurrence number when the same text repeats in the file]). No line number: survives lines moving, changes when the content changes."
+          },
+          "rule": {"type": "string"},
+          "severity": {"enum": ["high", "medium", "low"]},
+          "file": {"type": "string", "description": "relative to the skill root"},
+          "line": {"type": "integer", "description": "1-based; 0 for a finding about the whole file"},
+          "message": {"type": "string", "description": "what the rule means (airlock's text, sanitised)"},
+          "excerpt": {"type": "string", "description": "the matched text from the skill, sanitised and capped"},
+          "context": {"enum": ["skill_md", "reference_md", "fenced", "code", "comment"]},
+          "declared": {"type": "boolean", "description": "the description declares this behaviour, so the severity was lowered one level"},
+          "accepted": {"type": ["null", "object"], "description": "null until 0.3.0's `airlock accept` lands"},
+          "files_involved": {
+            "type": "array", "items": {"type": "string"},
+            "description": "every file the finding depends on (more than one for cross-file findings such as exfil-pattern or mismatch-*)"
+          },
+          "repeat": {"type": "boolean", "description": "true if the text report hides it (over 5 per rule and file)"}
+        }
+      }
+    }
+  }
+}

@@ -238,8 +238,8 @@ into `~/.claude/settings.json`, keeping everything else, and backs it up first. 
 |---|---|
 | `airlock sync [source…]` | mirror the catalogs and rebuild the local index |
 | `airlock find <words…> [--json]` | search the local index |
-| `airlock inspect <skill\|dir>` | copy into quarantine and audit |
-| `airlock audit <dir…> \| --installed` | audit in place, e.g. everything you already have installed |
+| `airlock inspect <skill\|dir> [--json]` | copy into quarantine and audit; `--json` prints the report ([schema](docs/audit-schema.json)) |
+| `airlock audit <dir…> \| --installed [--json]` | audit in place, e.g. everything you already have installed |
 | `airlock use <skill>` | once mode: print the quarantined path for this task; install nothing |
 | `airlock dock <skill> --temp 7d \| --keep [--agent …]` | install from quarantine |
 | `airlock vent <skill…> \| --expired` | remove skills Airlock installed |
