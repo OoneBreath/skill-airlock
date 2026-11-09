@@ -309,7 +309,142 @@ def resolve_quarantine(ref):
     return m
 
 
+# ---------- accepted findings and the decision log ----------
+
+# Findings aimed at the agent, not the user: never accepted, whatever the reason.
+UNACCEPTABLE = set(_audit.INSTRUCTION_RULES) | {"hidden-unicode", "bidi-control", "unicode-tags", "html-comment",
+                                                "unsafe-name"}
+
+
+def load_accepted():
+    return load_json(STATE / "accepted.json", {"accepted": []})
+
+
+def log_decision(action, skill_id, ids, reason=None):
+    """Append-only decision log: one JSON object per line."""
+    STATE.mkdir(parents=True, exist_ok=True)
+    rec = {"ts": iso(now()), "action": action, "skill": skill_id, "ids": list(ids)}
+    if reason is not None:
+        rec["reason"] = reason
+    with open(STATE / "decisions.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def apply_accepted(data, skill_id, source, hashes):
+    """Mark findings the user accepted for THIS source + skill, if the finding id and the sha256 of every
+    file it depends on still match; recompute the verdict. An accepted skill is never CLEAN.
+    Returns (data, {id: reason}, stale_count)."""
+    mine = {a["finding_id"]: a for a in load_accepted()["accepted"]
+            if a.get("skill_id") == skill_id and a.get("source") == source}
+    accepted, stale = {}, 0
+    for f in data["findings"]:
+        f["accepted"] = None
+        a = mine.get(f["id"])
+        if not a or f["rule"] in UNACCEPTABLE:
+            continue
+        pinned = a.get("files_sha256") or {}
+        if set(f["files_involved"]) <= set(pinned) and all(hashes.get(k) == v for k, v in pinned.items()):
+            f["accepted"] = {"reason": a.get("reason", ""), "accepted_at": a.get("accepted_at")}
+            accepted[f["id"]] = a.get("reason", "")
+        else:
+            stale += 1
+    counting = [f for f in data["findings"] if not f["accepted"]]
+    top = next((sev for sev in _audit.SEVERITIES if any(f["severity"] == sev for f in counting)), None)
+    data.setdefault("static_verdict", data["verdict"])
+    verdict = _audit.VERDICTS[top]
+    data["verdict"] = "OK" if accepted and verdict == "CLEAN" else verdict
+    data["accepted_count"] = len(accepted)
+    return data, accepted, stale
+
+
+def effective_verdict(m):
+    """The verdict with the user's acceptances applied (falls back to the inspected verdict)."""
+    data = load_json(m["qdir"] / "audit.json", None)
+    if not data or data.get("tree_sha256") != _audit.tree_digest(m["files"]):
+        return m["verdict"]
+    data["verdict"] = data.get("static_verdict", data["verdict"])
+    return apply_accepted(data, m["id"], m["source"], m["files"])[0]["verdict"]
+
+
+def cmd_accept(args):
+    m = resolve_quarantine(args.skill)
+    data = load_json(m["qdir"] / "audit.json", None)
+    if not data or data.get("tree_sha256") != _audit.tree_digest(m["files"]):
+        raise Fail(f"no current audit for {clean(m['id'], 120)}: run `airlock inspect {clean(m['id'], 120)}` again")
+    data["verdict"] = data.get("static_verdict", data["verdict"])
+    store = load_accepted()
+    sid = clean(m["id"], 120)
+
+    if args.list:
+        mine = [a for a in store["accepted"] if a.get("skill_id") == m["id"] and a.get("source") == m["source"]]
+        _, live, _ = apply_accepted(json.loads(json.dumps(data)), m["id"], m["source"], m["files"])
+        if not mine:
+            print(f"No accepted findings for {sid}.")
+        for a in mine:
+            state = "counts as accepted" if a["finding_id"] in live else "NO LONGER MATCHES (counts again)"
+            print(f"  {a['finding_id']}  {a['rule']}  {clean(a['file'], 80)}  {a.get('accepted_at', '?')}  {state}")
+            print(f"      reason: {_audit.sanitize(a.get('reason', ''), 200)}")
+        return
+    if args.revoke:
+        before = len(store["accepted"])
+        store["accepted"] = [a for a in store["accepted"] if not (a.get("skill_id") == m["id"]
+                             and a.get("source") == m["source"] and a["finding_id"] in args.revoke)]
+        save_json(STATE / "accepted.json", store)
+        log_decision("revoke", m["id"], args.revoke)
+        print(f"Revoked {before - len(store['accepted'])} acceptance(s) for {sid}.")
+    else:
+        by_id = {f["id"]: f for f in data["findings"]}
+        if args.rule:
+            hits = [f for f in data["findings"] if f["rule"] == args.rule and (not args.file or f["file"] == args.file)]
+            if not args.ids:
+                print(f"{len(hits)} finding(s) of rule {clean(args.rule, 40)}"
+                      + (f" in {clean(args.file, 80)}" if args.file else "") + ". Nothing accepted yet.")
+                for f in hits:
+                    print(f"  {f['id']}  {f['severity'].upper():6} {f['file']}:{f['line']}  ┊ {f['excerpt']}")
+                if hits:
+                    print(f"To accept them, after the user has read them: airlock accept {sid} "
+                          + " ".join(f["id"] for f in hits) + ' --reason "…"')
+                sys.exit(1)   # listed only; nothing accepted
+        if not args.ids:
+            raise Fail("give the finding ids to accept (`airlock inspect <skill> --json`, or --rule RULE to list them)")
+        if not (args.reason or "").strip():
+            raise Fail('--reason "…" is required: say why these findings are acceptable')
+        unknown = [i for i in args.ids if i not in by_id]
+        if unknown:
+            raise Fail("not findings of the current audit: " + ", ".join(clean(i, 20) for i in unknown))
+        refused = [by_id[i] for i in args.ids if by_id[i]["rule"] in UNACCEPTABLE]
+        if refused:
+            for f in refused:
+                print(f"  REFUSED {f['id']} {f['rule']}: aimed at the agent (instructions, hidden text or the "
+                      "skill's name), not at you; it can't be accepted. Use --force only if you decide to.")
+            raise Fail("nothing accepted")
+        store["accepted"] = [a for a in store["accepted"] if not (a.get("skill_id") == m["id"]
+                             and a.get("source") == m["source"] and a["finding_id"] in args.ids)]
+        for i in args.ids:
+            f = by_id[i]
+            store["accepted"].append({
+                "skill_id": m["id"], "source": m["source"], "commit": m["commit"], "finding_id": i,
+                "rule": f["rule"], "file": f["file"],
+                "files_sha256": {p: m["files"][p] for p in f["files_involved"] if p in m["files"]},
+                "reason": args.reason.strip(), "accepted_at": iso(now())})
+        save_json(STATE / "accepted.json", store)
+        log_decision("accept", m["id"], args.ids, args.reason.strip())
+    data, accepted, stale = apply_accepted(data, m["id"], m["source"], m["files"])
+    save_json(m["qdir"] / "audit.json", data)
+    m["verdict"] = data["verdict"]
+    save_json(m["qdir"] / "meta.json", {k: v for k, v in m.items() if k != "qdir"})
+    for f in data["findings"]:
+        if f["accepted"] and (not args.revoke):
+            if f["id"] in (args.ids or []):
+                print(f"  ACCEPTED {f['severity'].upper()} {f['rule']} {f['file']}:{f['line']} "
+                      f"(reason: {_audit.sanitize(f['accepted']['reason'], 120)})")
+    note = f" ({len(accepted)} finding(s) accepted by you)" if accepted else ""
+    print(f"Verdict for {sid} now: {data['verdict']}{note}; static audit: {data['static_verdict']}.")
+    print("An accepted finding comes back as soon as its line or any file it depends on changes.")
+
+
 def gate(m, force):
+    m["verdict"] = effective_verdict(m)
     if m["verdict"] == "BLOCK" and not force:
         raise Fail(f"{clean(m['id'], 120)} has HIGH audit findings (see `airlock inspect {clean(m['id'], 120)}`). "
                    "Not proceeding. Only the user can decide to override with --force.")
@@ -339,15 +474,22 @@ def cmd_inspect(args):
             "counts": report["counts"], "files": tree_hashes(qdir / "skill"), "uses": []}
     save_json(qdir / "meta.json", meta)
     data = audit_json(report, qdir / "skill", skill_id=e["id"], source=e["source"], commit=e["commit"])
+    data, accepted, stale = apply_accepted(data, e["id"], e["source"], meta["files"])
+    meta["verdict"] = data["verdict"]
+    save_json(qdir / "meta.json", meta)
     save_json(qdir / "audit.json", data)   # the last report, for `accept` and the decision log
-    text = _audit.render(report, title=f"{clean(e['id'], 120)} @ {clean(e['commit'], 10)}")
+    text = _audit.render(report, title=f"{clean(e['id'], 120)} @ {clean(e['commit'], 10)}",
+                         accepted=accepted, verdict=data["verdict"])
+    if stale:
+        text += (f"\n  {stale} earlier acceptance(s) no longer match: the line or a file it depends on changed, "
+                 "so those findings count again.")
     (qdir / "audit.txt").write_text(text + "\n", encoding="utf-8")
     if getattr(args, "json", False):
         print_json(data)
         return
     print(text)
     print(f"\nQuarantined at {qdir / 'skill'} (nothing installed).")
-    if report["verdict"] == "BLOCK":
+    if data["verdict"] == "BLOCK":
         print("Recommendation: do not use. HIGH findings above.")
     else:
         sid = clean(e["id"], 120)
@@ -666,6 +808,16 @@ def main(argv=None):
     s.add_argument("--summary", action="store_true", help="one line per skill")
     s.add_argument("--json", action="store_true", help='print {"reports": [...]} as one JSON document (docs/audit-schema.json)')
     s.set_defaults(fn=cmd_audit)
+
+    s = sub.add_parser("accept", help="accept specific findings of a quarantined skill, pinned to their content")
+    s.add_argument("skill")
+    s.add_argument("ids", nargs="*", help="finding ids from `airlock inspect <skill> --json`")
+    s.add_argument("--reason", help="why these findings are acceptable (required to accept)")
+    s.add_argument("--rule", help="list the findings of this rule (with --file: in that file) and their ids")
+    s.add_argument("--file", help="with --rule: only this file")
+    s.add_argument("--list", action="store_true", help="show what you accepted for this skill")
+    s.add_argument("--revoke", nargs="+", metavar="ID", help="withdraw acceptances")
+    s.set_defaults(fn=cmd_accept)
 
     s = sub.add_parser("use", help="once mode: use a quarantined skill for this task only, install nothing")
     s.add_argument("skill")

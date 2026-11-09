@@ -169,6 +169,34 @@ a hook to the agent's settings, and a `.txt` file run by `SKILL.md` dodging the 
 now a test case. The full record, probe by probe and skill by skill, is in
 [docs/calibration.md](docs/calibration.md).
 
+### Security tools that trip the audit
+
+A tool whose job is security reads what an attacker would read. [server-audit](https://github.com/OoneBreath/server-audit)
+scans for leaked keys, lists `authorized_keys` and probes ports with bash's `/dev/tcp`. Audited
+as the whole repo on 2026-11-09, it gets BLOCK with 22 HIGH and 43 MEDIUM findings. Of those, 13 HIGH and
+36 MEDIUM, counting repeats, are in the files the skill ships (`SKILL.md`, `references/`, `scripts/`).
+The rest come from its own lab and tests, and one of them stays BLOCK on purpose: a test string,
+"Disregard all prior instructions.", that checks server-audit's own injection detector. Airlock can't
+tell a test from an attack.
+
+`--force` would wave all of it through, so `airlock accept` exists to accept only the findings you
+have read, pinned to their content:
+
+```
+airlock inspect server-audit --json                 # the findings with their ids
+airlock accept server-audit --rule reverse-shell    # lists the ids of one rule; accepts nothing
+airlock accept server-audit <id> <id> … --reason "port probe in probe_external.sh, read by hand"
+```
+
+- **What happens to an accepted finding.** It stays in the report, marked `ACCEPTED`, and stops
+  counting toward the verdict. This lasts only while its id and the sha256 of every file it depends on
+  are unchanged. Any edit to such a file brings it back.
+- **What can't be accepted.** Findings aimed at the agent — instructions, hidden text, the skill's
+  name — are refused.
+- **Scope and verdict.** An acceptance applies to that source and skill only. An accepted skill is
+  never `CLEAN`; the best it gets is `OK`, with "N finding(s) accepted by you".
+- **Where it's recorded.** Every accept and revoke goes to `~/.skill-airlock/decisions.jsonl`.
+
 **Limits.** This is a static filter. A clean report means "nothing known was found", not "safe".
 Pattern rules can always be evaded by code written to dodge them, so treat REVIEW as "read it
 yourself", and read the scripts of any skill from a source you don't know, whatever the verdict.
@@ -240,6 +268,7 @@ into `~/.claude/settings.json`, keeping everything else, and backs it up first. 
 | `airlock find <words…> [--json]` | search the local index |
 | `airlock inspect <skill\|dir> [--json]` | copy into quarantine and audit; `--json` prints the report ([schema](docs/audit-schema.json)) |
 | `airlock audit <dir…> \| --installed [--json]` | audit in place, e.g. everything you already have installed |
+| `airlock accept <skill> <id…> --reason "…"` | accept findings you have read, pinned to their content (`--list`, `--revoke`, `--rule`) |
 | `airlock use <skill>` | once mode: print the quarantined path for this task; install nothing |
 | `airlock dock <skill> --temp 7d \| --keep [--agent …]` | install from quarantine |
 | `airlock vent <skill…> \| --expired` | remove skills Airlock installed |
