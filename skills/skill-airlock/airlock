@@ -219,7 +219,8 @@ def scan_catalog(src, root, commit, date):
         proot = find_plugin_root(dirpath, stop=root)
         entries.append({"id": sid, "source": src["id"], "trust": src.get("trust", "community"), "name": name,
                         "description": desc, "path": rel, "commit": commit, "date": date,
-                        "plugin_root": os.path.relpath(proot, root) if proot else None,
+                        # both resolved: on macOS /var is a symlink to /private/var
+                        "plugin_root": os.path.relpath(proot, Path(root).resolve()) if proot else None,
                         "has_scripts": has_scripts, "flags": flags,
                         "desc_tokens": _audit.tokens(name + meta.get("description", "")),
                         "body_tokens": _audit.tokens("\n".join(text.splitlines()[body_start:]))})
