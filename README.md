@@ -269,6 +269,7 @@ into `~/.claude/settings.json`, keeping everything else, and backs it up first. 
 | `airlock inspect <skill\|dir> [--json]` | copy into quarantine and audit; `--json` prints the report ([schema](docs/audit-schema.json)) |
 | `airlock audit <dir…> \| --installed [--json]` | audit in place, e.g. everything you already have installed |
 | `airlock accept <skill> <id…> --reason "…"` | accept findings you have read, pinned to their content (`--list`, `--revoke`, `--rule`) |
+| `airlock review-pack <skill>` / `review-check <skill> <answer.json>` | semantic review by a fresh, Read-only subagent; it can only raise the verdict |
 | `airlock use <skill>` | once mode: print the quarantined path for this task; install nothing |
 | `airlock dock <skill> --temp 7d \| --keep [--agent …]` | install from quarantine |
 | `airlock vent <skill…> \| --expired` | remove skills Airlock installed |

@@ -2,6 +2,25 @@
 
 ## 0.3.0 (unreleased)
 
+- **Semantic review by a fresh subagent.** airlock prepares the review and checks the answer; it
+  never calls a model.
+  - **`airlock review-pack <skill>`** writes `pack.md` and `questions.json` into the quarantine.
+    `pack.md` opens with an untrusted-content header, then the metadata, the static findings, and every
+    file with line numbers, in a fence longer than any fence in the file, invisible characters shown as
+    `<U+XXXX>`. It is capped at ~60k tokens; SKILL.md and scripts are always included, the rest is listed
+    under "Not included". `questions.json` holds 7 fixed questions.
+  - **`airlock review-check <skill> <answer.json>`** validates the reviewer's JSON: exactly q1..q7;
+    every cited file:line exists inside the quarantined skill; text capped at 600 characters; no
+    secret-looking text; q6 ids are real findings. Otherwise `review_status: invalid` and the verdict is
+    unchanged.
+  - **It can only raise.** A q3/q4/q5/q7 item at a file:line no static finding covers, marked
+    `expected: false`, adds a `llm-review` finding one level above the current verdict (OK→REVIEW,
+    REVIEW→BLOCK). A claimed false positive (q6) is shown as input for `accept`. A review never lowers
+    a verdict.
+  - **Agent instructions.** SKILL.md has a new step 3b: a fresh subagent whose only tool is Read; the
+    main agent never reads the pack. Rationale and residual risk: docs/design.md.
+  - **Tests.** A fixture whose risk is only semantic (`tests/review_fixtures/pr-notes`: static CLEAN,
+    raised to REVIEW by a canned answer) and 8 tests.
 - **`airlock accept`: accept findings you have read, pinned to their content.** For tools that
   legitimately trip the audit (security tools), instead of `--force`. You run
   `airlock accept <skill> <id…> --reason "…"` on a quarantined skill with a current `audit.json`; it

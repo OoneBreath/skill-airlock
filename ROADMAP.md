@@ -35,6 +35,7 @@ Ordered by what makes the tool useful soonest. Versions are targets, not promise
       that isn't on the trust list is REVIEW at least, whatever the static rules find: they can be evaded
 - [ ] Sandboxed runs of a skill's bundled scripts where the OS provides one (no network, read-only
       outside a work dir). Instructions the agent follows can't be sandboxed this way; scripts can.
+- [x] Semantic review by a fresh, Read-only subagent (`review-pack` / `review-check`); it can only raise the verdict
 - [x] Accepted findings, pinned to their content (`airlock accept`), for tools that legitimately trip the audit
 - [~] Decision log: who approved which skill, at which commit and audit verdict, for how long, and
       when and why it was vented. Started: `decisions.jsonl` records every accept/revoke; `lock.json`
