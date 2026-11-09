@@ -1,6 +1,18 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## 0.3.0: findings you can act on
+
+Released 9 November 2026. What changed:
+- the audit report is machine-readable, with stable finding ids;
+- you can accept the findings you have read, pinned to their content, instead of `--force`;
+- a fresh, Read-only subagent can add a semantic review that can only raise the verdict;
+- skills inside plugins are audited with the plugin's hooks and MCP servers;
+- the report lists what it did not read and flags prose that tells the agent to run remote packages.
+
+On the three public catalogs this moved 10 of 62 verdicts (6 for plugins, 4 for package
+instructions; see [docs/calibration.md](docs/calibration.md)): 1 BLOCK, 31 REVIEW, 30 OK/CLEAN, from
+1 / 24 / 37. All 7 malicious fixtures stay BLOCK. Sandboxed script runs moved to v0.4 (see ROADMAP).
+
 
 - **What the audit did not read is listed.** `not_scanned[]` in the JSON report holds each skipped file
   with its reason (`binary`, `too-large`, `symlink-out`, `unreadable`) and size; the text report gets a
