@@ -35,8 +35,10 @@ Ordered by what makes the tool useful soonest. Versions are targets, not promise
       that isn't on the trust list is REVIEW at least, whatever the static rules find: they can be evaded
 - [ ] Sandboxed runs of a skill's bundled scripts where the OS provides one (no network, read-only
       outside a work dir). Instructions the agent follows can't be sandboxed this way; scripts can.
-- [ ] Decision log: who approved which skill, at which commit and audit verdict, for how long, and
-      when and why it was vented (`lock.json` already records the install side)
+- [x] Accepted findings, pinned to their content (`airlock accept`), for tools that legitimately trip the audit
+- [~] Decision log: who approved which skill, at which commit and audit verdict, for how long, and
+      when and why it was vented. Started: `decisions.jsonl` records every accept/revoke; `lock.json`
+      records the install side
 - [ ] Profiles: a named set of skills per project or kind of work, switched in one command
 - [ ] Plugin and built-in skills in `budget`
 - [ ] Usage counts per skill in `budget` (not just last use)

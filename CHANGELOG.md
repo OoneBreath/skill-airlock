@@ -2,6 +2,23 @@
 
 ## 0.3.0 (unreleased)
 
+- **`airlock accept`: accept findings you have read, pinned to their content.** For tools that
+  legitimately trip the audit (security tools), instead of `--force`. You run
+  `airlock accept <skill> <id…> --reason "…"` on a quarantined skill with a current `audit.json`; it
+  stores `~/.skill-airlock/accepted.json` and offers `--list`, `--revoke <id…>`, and `--rule R [--file F]`,
+  which lists the ids and accepts nothing.
+  - **Effect on the verdict.** An accepted finding stays in the report, marked `ACCEPTED`, and stops
+    counting toward the verdict while its id and the sha256 of every file it depends on still match
+    (all of `files_involved` for cross-file findings). A change brings it back, and the report says so.
+    The verdict is computed over every finding, including the repeats the text report hides, so
+    accepting the visible lines doesn't lower it over lines you never saw.
+  - **Limits, enforced and tested.** Findings aimed at the agent are refused: instruction rules,
+    `hidden-unicode`, `bidi-control`, `unicode-tags`, `html-comment`, `unsafe-name`. An acceptance is
+    per source and skill. An accepted skill is never `CLEAN`, `OK` at best.
+  - **Decision log and agent rule.** Every accept and revoke is appended to
+    `~/.skill-airlock/decisions.jsonl` (the start of the roadmap's decision log). SKILL.md: the agent
+    may propose exact ids after the user has read the findings, and runs `accept` only after the user
+    agrees.
 - **Machine-readable audit report.** `airlock inspect <skill> --json` and `airlock audit <dir…> --json`
   print one JSON document ([docs/audit-schema.json](docs/audit-schema.json); audit: `{"reports": [...]}`).
   The text output stays the default and exit codes are unchanged. Each finding has a stable `id`
