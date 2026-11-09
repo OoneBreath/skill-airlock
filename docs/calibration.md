@@ -18,6 +18,7 @@ and `vercel-labs/agent-skills`, mirrored on 30 October 2026 (claude-plugins-offi
 | Review 2, round 3 (4 phrasings) · working v0.1.6 | 1 | 24 | 37 | + 2 REVIEW cases |
 | **v0.2.0**, after review 2, round 4 (7 phrasings) · working v0.1.7 | 1 | 24 | 37 | + 9 REVIEW phrasings |
 | 0.3.0 (unreleased): plugin hooks, MCP servers, manifest | 1 | 27 | 34 | 7 / 7 + 4 plugin fixtures |
+| 0.3.0 (unreleased): remote-package instructions in prose, not-scanned list | 1 | 31 | 30 | 7 / 7 + 12 probes |
 
 v0.1.0 shipped 5 fixtures: 4 malicious (`exfil`, `hidden`, `obfuscated`, `persistence`) and 1 clean.
 v0.2.0 adds 3 malicious fixtures (`prose-pipe`, `split-exfil`, `name-injection`), one REVIEW fixture
@@ -224,4 +225,47 @@ Totals: 1 BLOCK · 27 REVIEW · 34 OK/CLEAN (was 1 · 24 · 37). A REVIEW for a 
 point: installing the plugin runs code in every session, whatever the skill's own files say. The output
 also says what docking the skill alone does and doesn't install. That was checked against `dock`, which
 copies the skill directory only.
+
+## 0.3.0: remote-package instructions in prose, and what the audit did not read
+
+**Probes.** Each phrase was put in a test skill's `SKILL.md` prose ("Before you start, … and then
+format the table."), with a description that doesn't mention it. 0.2.0 caught most of them only as
+`runtime-install` LOW, and three not at all:
+
+| Phrase | 0.2.0 | 0.3.0 |
+|---|---|---|
+| `npx some-pkg` | LOW `runtime-install` | MEDIUM `prose-remote-package` |
+| `npx -y some-pkg@latest` | LOW | HIGH (no confirmation prompt) |
+| `npx some-pkg@1.2.3` | LOW | LOW (pinned: one level down) |
+| `npx some-pkg@latest` | LOW | MEDIUM (unpinned, as a bare `npx pkg` already is; still prompted) |
+| `uvx tool`, `bunx some-tool`, `pip install x`, `npm i -g x` | LOW | MEDIUM |
+| `pipx run tool`, `pnpm dlx tool`, `yarn dlx tool` | **not caught** | MEDIUM |
+| `deno run https://…` | LOW `remote-content` | MEDIUM |
+| `npm install some-lib` (a project's own dependencies) | LOW | not this rule (left alone on purpose) |
+| "do not run `pip install`" (negated) | LOW | not this rule |
+
+In reference Markdown the rule is LOW. Scripts keep their existing rules (`runtime-install` is
+MEDIUM in scripts).
+
+**Two choices that differ from a literal reading of the plan.**
+1. **HIGH needs `-y`/`--yes` (no confirmation prompt), not `@latest`.** `npx` without `-y` asks before
+   it installs a package, and `@latest` only says "unpinned", which a bare `npx pkg` already is. With
+   `@latest` counted as HIGH, two official skills became BLOCK for a migration codemod (`mcp-builder`)
+   and a deploy command (`deploy-to-vercel`).
+2. **A package the description names is "declared" and drops one level,** like every other declared
+   behaviour. The user sees it in the description at `find` time. `deploy-to-vercel` runs
+   `npx vercel@latest deploy … -y` and says "Deploy applications and websites to Vercel": HIGH → MEDIUM.
+
+**Catalogs (2026-11-09, mirrors from 2026-10-28):** 4 of 62 verdicts changed, all OK → REVIEW. Totals
+1 BLOCK · 31 REVIEW · 30 OK/CLEAN.
+
+| Skill | Line | Why |
+|---|---|---|
+| anthropics-skills/`pdf` | `# Requires: pip install pytesseract pdf2image` | install instruction, packages not in the description |
+| anthropics-skills/`slack-gif-creator` | `pip install pillow imageio numpy` | same |
+| anthropics-skills/`xlsx` | "do not run `pip install` first … Only if an import fails: `pip install` the missing package" | the negated part is skipped; the fallback install is an instruction |
+| vercel-agent-skills/`deploy-to-vercel` | `npx vercel@latest deploy [path] --temporary -y` | no prompt (HIGH), declared in the description (→ MEDIUM) |
+
+**Not scanned.** Across the 62 skills, 56 files are not read, all `binary` (images, fonts, PDFs). No
+catalog skill runs a file the audit could not read (`unscanned-invoked`).
 
