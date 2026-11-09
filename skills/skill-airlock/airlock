@@ -317,6 +317,15 @@ def gate(m, force):
 
 # ---------- inspect, audit, use ----------
 
+def audit_json(report, root, skill_id=None, source=None, commit=None):
+    return _audit.report_json(report, VERSION, skill_id=skill_id, source=source, commit=commit,
+                              tree_sha256=_audit.tree_digest(tree_hashes(root)), audited_at=iso(now()))
+
+
+def print_json(data):
+    print(json.dumps(data, indent=1, ensure_ascii=False))
+
+
 def cmd_inspect(args):
     e = resolve_catalog(args.skill)
     qdir = STATE / "quarantine" / qid(e["id"])
@@ -329,8 +338,13 @@ def cmd_inspect(args):
             "origin": str(e["root"]), "inspected_at": iso(now()), "verdict": report["verdict"],
             "counts": report["counts"], "files": tree_hashes(qdir / "skill"), "uses": []}
     save_json(qdir / "meta.json", meta)
+    data = audit_json(report, qdir / "skill", skill_id=e["id"], source=e["source"], commit=e["commit"])
+    save_json(qdir / "audit.json", data)   # the last report, for `accept` and the decision log
     text = _audit.render(report, title=f"{clean(e['id'], 120)} @ {clean(e['commit'], 10)}")
     (qdir / "audit.txt").write_text(text + "\n", encoding="utf-8")
+    if getattr(args, "json", False):
+        print_json(data)
+        return
     print(text)
     print(f"\nQuarantined at {qdir / 'skill'} (nothing installed).")
     if report["verdict"] == "BLOCK":
@@ -354,18 +368,32 @@ def cmd_audit(args):
     targets = []
     if args.installed:
         targets += [(f"{agent}:{d.name}", d) for agent, d in installed_dirs()]
+    meta = {}
     for ref in args.skills:
         p = Path(ref).expanduser()
-        targets.append((ref, p) if p.is_dir() else (ref, resolve_catalog(ref)["root"]))
+        if p.is_dir():
+            targets.append((ref, p))
+        else:
+            e = resolve_catalog(ref)
+            targets.append((ref, e["root"]))
+            meta[ref] = e
     if not targets:
         raise Fail("nothing to audit: give a skill or directory, or --installed")
     summary = []
+    as_json = getattr(args, "json", False)
     for label, d in targets:
         r = _audit.audit(d)
         summary.append((label, r))
-        if not args.summary:
+        if not args.summary and not as_json:
             print(_audit.render(r, title=label) + "\n")
-    if len(summary) > 1 or args.summary:
+    if as_json:
+        reports = []
+        for (label, d), (_, r) in zip(targets, summary):
+            e = meta.get(label)
+            reports.append(audit_json(r, d, skill_id=e["id"] if e else None, source=e["source"] if e else "local",
+                                      commit=e["commit"] if e else None) | {"label": label})
+        print_json({"schema_version": _audit.SCHEMA_VERSION, "reports": reports})
+    elif len(summary) > 1 or args.summary:
         print("Summary")
         for label, r in sorted(summary, key=lambda x: ("BLOCK", "REVIEW", "OK", "CLEAN").index(x[1]["verdict"])):
             c = r["counts"]
@@ -415,9 +443,12 @@ def cmd_dock(args):
         shutil.copytree(m["qdir"] / "skill", dest, symlinks=True)
         paths.append(str(dest))
     expires = iso(now() + parse_duration(args.temp)) if args.temp else None
+    last = load_json(m["qdir"] / "audit.json", {})   # verdict + finding ids, never the excerpts
     lock["skills"][name] = {"id": m["id"], "source": m["source"], "commit": m["commit"],
                             "mode": "temp" if args.temp else "keep", "expires": expires, "agents": agents,
-                            "paths": paths, "docked_at": iso(now()), "verdict": m["verdict"], "files": m["files"]}
+                            "paths": paths, "docked_at": iso(now()), "verdict": m["verdict"], "files": m["files"],
+                            "tree_sha256": last.get("tree_sha256") or _audit.tree_digest(m["files"]),
+                            "finding_ids": [f["id"] for f in last.get("findings", [])]}
     save_json(STATE / "lock.json", lock)
     until = f"until {expires}" if expires else "pinned, kept"
     print(f"DOCKED {name} ({m['id']} @ {m['commit'][:10]}, {until}) → {', '.join(paths)}")
@@ -626,12 +657,14 @@ def main(argv=None):
 
     s = sub.add_parser("inspect", help="copy a skill into quarantine and audit it")
     s.add_argument("skill", help="index id, unique name, or a local skill directory")
+    s.add_argument("--json", action="store_true", help="print the audit report as one JSON document (docs/audit-schema.json)")
     s.set_defaults(fn=cmd_inspect)
 
     s = sub.add_parser("audit", help="audit skills in place (any directory, or everything installed)")
     s.add_argument("skills", nargs="*")
     s.add_argument("--installed", action="store_true", help="audit every skill in the agents' skill directories")
     s.add_argument("--summary", action="store_true", help="one line per skill")
+    s.add_argument("--json", action="store_true", help='print {"reports": [...]} as one JSON document (docs/audit-schema.json)')
     s.set_defaults(fn=cmd_audit)
 
     s = sub.add_parser("use", help="once mode: use a quarantined skill for this task only, install nothing")

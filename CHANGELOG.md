@@ -2,6 +2,18 @@
 
 ## 0.3.0 (unreleased)
 
+- **Machine-readable audit report.** `airlock inspect <skill> --json` and `airlock audit <dir…> --json`
+  print one JSON document ([docs/audit-schema.json](docs/audit-schema.json); audit: `{"reports": [...]}`).
+  The text output stays the default and exit codes are unchanged. Each finding has a stable `id`
+  (sha256 of rule, file and the matched text with whitespace normalised, no line number, plus an
+  occurrence number when the same text repeats in a file), `context` (`skill_md`, `reference_md`,
+  `fenced`, `code`, `comment`), `declared`, `files_involved` (every file a cross-file finding such as
+  `exfil-pattern` or `mismatch-*` depends on) and `repeat`. JSON lists every finding, including the
+  repeats the text report hides past 5 per rule and file. Text from the skill is sanitised exactly as in
+  the text output, and the report names those fields in `untrusted_fields`. `inspect` saves the last
+  report as `quarantine/<qid>/audit.json`; `dock` records the verdict, the finding ids and `tree_sha256`
+  in `lock.json` (never the excerpts). Verdicts are unchanged: re-running the three public catalogs (62
+  skills, mirrors from 2026-10-28) gives 1 BLOCK, 24 REVIEW, 37 OK/CLEAN, as in 0.2.0.
 - CI: Python 3.9 runs on `ubuntu-24.04`. setup-python has no 3.9 for `ubuntu-latest` (now Ubuntu 26.04),
   so the next run on the old matrix would have failed before any test ran.
 
