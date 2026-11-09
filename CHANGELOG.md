@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0 (unreleased)
+
+- CI: Python 3.9 runs on `ubuntu-24.04`. setup-python has no 3.9 for `ubuntu-latest` (now Ubuntu 26.04),
+  so the next run on the old matrix would have failed before any test ran.
+
 ## 0.2.0: the audit after independent reviews
 
 Released 31 October 2026. The rule changes between 0.1.0 and 0.2.0 were committed as working
