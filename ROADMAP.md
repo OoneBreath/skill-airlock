@@ -33,8 +33,8 @@ Ordered by what makes the tool useful soonest. Versions are targets, not promise
       didn't before** (e.g. "new network access in scripts/sync.sh"); ask before applying
 - [ ] Trust list and blocklist (authors, repos, specific commits). A skill with scripts from a source
       that isn't on the trust list is REVIEW at least, whatever the static rules find: they can be evaded
-- [ ] Sandboxed runs of a skill's bundled scripts where the OS provides one (no network, read-only
-      outside a work dir). Instructions the agent follows can't be sandboxed this way; scripts can.
+- [x] Skills inside plugins: the plugin's hooks, MCP servers and hook scripts are audited with the skill
+- [x] What the audit did not read is listed (`not_scanned`); remote-package instructions in prose are flagged
 - [x] Semantic review by a fresh, Read-only subagent (`review-pack` / `review-check`); it can only raise the verdict
 - [x] Accepted findings, pinned to their content (`airlock accept`), for tools that legitimately trip the audit
 - [~] Decision log: who approved which skill, at which commit and audit verdict, for how long, and
@@ -45,6 +45,15 @@ Ordered by what makes the tool useful soonest. Versions are targets, not promise
 - [ ] Usage counts per skill in `budget` (not just last use)
 
 ## v0.4: learn from use
+
+- [ ] Sandboxed runs of a skill's bundled scripts, only where the OS really enforces it (no network,
+      empty environment, read-only skill and toolchain, writes only in a fresh work dir, no access to
+      `~/.ssh` and the like, CPU/memory/process/time limits), and a refusal naming the missing control
+      otherwise. Moved from v0.3 after checking the ground: on Ubuntu 24.04
+      `kernel.apparmor_restrict_unprivileged_userns = 1`, so `bwrap` often can't start without an
+      AppArmor profile, and macOS doesn't enforce a memory limit, so "all controls or refuse" would
+      always refuse there. Instructions the agent follows from SKILL.md can't be sandboxed this way;
+      scripts can.
 
 - [ ] Local ratings ledger: "worked 24×, failed 2×" per skill and task type, no central server;
       optionally mirrored into Project Brain so the agent knows what to rent next time
