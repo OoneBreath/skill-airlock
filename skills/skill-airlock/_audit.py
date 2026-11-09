@@ -5,6 +5,7 @@ A clean report means "nothing known was found", never "safe".
 Python 3 stdlib only.
 """
 import hashlib
+import json
 import os
 import re
 import unicodedata
@@ -401,8 +402,77 @@ def tree_digest(hashes):
     return hashlib.sha256(blob.encode("utf-8", "replace")).hexdigest()
 
 
-def audit(root):
-    """Audit one skill directory. Returns a report dict (see render() and report_json())."""
+# ---------- plugins: the skill's directory is not where a plugin's authority lives ----------
+
+PLUGIN_ROOT_VAR = re.compile(r"\$\{?CLAUDE_PLUGIN_ROOT\}?/([^\s\"'`;|&)]+)")
+PLUGIN_DEPENDENCY = re.compile(r"\bmcp__[A-Za-z0-9_-]+__|\bthe (?:\w+ )?hooks? (?:will|runs?|checks?|blocks?|adds?)\b", re.I)
+
+
+def _json_file(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read(MAX_BYTES)
+        return json.loads(text), text
+    except (OSError, ValueError):
+        return None, ""
+
+
+def _line_of(text, needle):
+    """1-based line of the first occurrence of `needle` (as JSON-escaped text) in `text`, else 0."""
+    probe = json.dumps(needle)[1:-1][:60]
+    i = text.find(probe) if probe else -1
+    return text.count("\n", 0, i) + 1 if i >= 0 else 0
+
+
+def plugin_config(plugin_root):
+    """What a plugin adds beyond its skills: {name, hooks: [...], mcp: [...], scripts: [...]}.
+    Paths are relative to the plugin root. MCP env and header VALUES are never read out, only names."""
+    manifest, _ = _json_file(os.path.join(plugin_root, ".claude-plugin", "plugin.json"))
+    manifest = manifest if isinstance(manifest, dict) else {}
+    out = {"name": str(manifest.get("name") or os.path.basename(os.path.abspath(plugin_root))), "hooks": [], "mcp": [],
+           "scripts": []}
+    sources = []
+    for rel in ("hooks/hooks.json", "hooks.json"):
+        data, text = _json_file(os.path.join(plugin_root, rel))
+        if isinstance(data, dict):
+            sources.append((rel, data.get("hooks", data), text))
+    if isinstance(manifest.get("hooks"), dict):
+        sources.append((".claude-plugin/plugin.json", manifest["hooks"], _json_file(
+            os.path.join(plugin_root, ".claude-plugin", "plugin.json"))[1]))
+    for rel, hooks, text in sources:
+        for event, groups in (hooks.items() if isinstance(hooks, dict) else []):
+            for g in groups if isinstance(groups, list) else []:
+                for h in (g.get("hooks", []) if isinstance(g, dict) else []):
+                    cmd = h.get("command") if isinstance(h, dict) else None
+                    if isinstance(cmd, str) and cmd.strip():
+                        out["hooks"].append({"event": str(event), "command": cmd, "file": rel, "line": _line_of(text, cmd)})
+                        out["scripts"] += PLUGIN_ROOT_VAR.findall(cmd)
+    servers = []
+    data, text = _json_file(os.path.join(plugin_root, ".mcp.json"))
+    if isinstance(data, dict):
+        servers.append((".mcp.json", data.get("mcpServers", data), text))
+    if isinstance(manifest.get("mcpServers"), dict):
+        servers.append((".claude-plugin/plugin.json", manifest["mcpServers"], _json_file(
+            os.path.join(plugin_root, ".claude-plugin", "plugin.json"))[1]))
+    for rel, block, text in servers:
+        for name, cfg in (block.items() if isinstance(block, dict) else []):
+            if not isinstance(cfg, dict):
+                continue
+            cmdline = " ".join([str(cfg.get("command", ""))] + [str(a) for a in cfg.get("args", []) if isinstance(a, (str, int))]).strip()
+            out["mcp"].append({"name": str(name), "url": str(cfg["url"]) if cfg.get("url") else None,
+                               "command": cmdline or None,
+                               "env": sorted(str(k) for k in (cfg.get("env") or {}) if isinstance(cfg.get("env"), dict)),
+                               "headers": sorted(str(k) for k in (cfg.get("headers") or {}) if isinstance(cfg.get("headers"), dict)),
+                               "file": rel, "line": _line_of(text, str(name))})
+            if cmdline:
+                out["scripts"] += PLUGIN_ROOT_VAR.findall(cmdline)
+    out["scripts"] = sorted({p for p in out["scripts"] if ".." not in p.split("/")})
+    return out
+
+
+def audit(root, plugin_root=None):
+    """Audit one skill directory (and, for a skill shipped inside a plugin, the plugin's hooks, MCP
+    servers and the scripts they run). Returns a report dict (see render() and report_json())."""
     root = os.path.abspath(root)
     real_root = os.path.realpath(root)
     findings, files, scripts = [], [], []
@@ -606,6 +676,72 @@ def audit(root):
             "touches credentials but the description never mentions them"
             + ("" if net_files else " (no network use found in scripts)"), involved=sec_files + ["SKILL.md"])
 
+    plugin = None
+    if plugin_root and os.path.isdir(plugin_root):
+        cfg = plugin_config(plugin_root)
+        plugin = {"name": cfg["name"], "hooks": len(cfg["hooks"]), "mcp_servers": len(cfg["mcp"])}
+
+        def scan_command(rel, line, cmd, context):
+            hit = set()
+            for rule, sev, rx, note in COMPILED:
+                if rule in INSTRUCTION_RULES or not rx.search(cmd):
+                    continue
+                add(sev, rule, rel, line, cmd, note + " (in a plugin command)", context=context)
+                hit.add(rule)
+            if hit & NETWORK_RULES and hit & SECRET_RULES:
+                add(HIGH, "exfil-pattern", rel, line, cmd, "a plugin command reads secrets and uses the network", context=context)
+
+        for h in cfg["hooks"]:
+            rel = "plugin/" + h["file"]
+            add(MEDIUM, "plugin-hook", rel, h["line"], h["command"],
+                f"runs on {h['event']} in every session once the plugin is installed", context="code")
+            scan_command(rel, h["line"], h["command"], "code")
+        for srv in cfg["mcp"]:
+            rel = "plugin/" + srv["file"]
+            names = (f"; env: {', '.join(srv['env'])}" if srv["env"] else "") + \
+                    (f"; headers: {', '.join(srv['headers'])}" if srv["headers"] else "")
+            if srv["url"]:
+                add(MEDIUM, "plugin-mcp-remote", rel, srv["line"], f"{srv['name']}: {srv['url']}",
+                    "remote MCP server: its tools run elsewhere and can change at any time" + names, context="code")
+            if srv["command"]:
+                add(LOW, "plugin-mcp-local", rel, srv["line"], f"{srv['name']}: {srv['command']}",
+                    "local MCP server the plugin starts" + names, context="code")
+                scan_command(rel, srv["line"], srv["command"], "code")
+        net_s, sec_s = set(), set()
+        for script in cfg["scripts"]:
+            full = os.path.join(plugin_root, script)
+            if not os.path.isfile(full) or os.path.islink(full):
+                continue
+            with open(full, "rb") as fh:
+                text = fh.read(MAX_BYTES).decode("utf-8", errors="replace")
+            rel = "plugin/" + script
+            for no, line in enumerate(text.splitlines(), 1):
+                scan = line[:MAX_LINE]
+                comment = _is_comment(scan)
+                line_rules = set()
+                for rule, sev, rx, note in COMPILED:
+                    if not rx.search(scan):
+                        continue
+                    add(DOWNGRADE[sev] if comment else sev, rule, rel, no, scan, note + " (script run by a plugin hook)",
+                        context="comment" if comment else "code")
+                    if not comment:
+                        line_rules.add(rule)
+                if line_rules & NETWORK_RULES and line_rules & SECRET_RULES:
+                    add(HIGH, "exfil-pattern", rel, no, scan, "a hook script reads secrets and sends them in the same command")
+                net_s |= {rel} if line_rules & NETWORK_RULES else set()
+                sec_s |= {rel} if line_rules & SECRET_RULES else set()
+        if net_s and sec_s and not net_s & sec_s:
+            add(HIGH, "exfil-pattern", sorted(sec_s)[0], 0, f"secrets in {', '.join(sorted(sec_s))}; network in "
+                f"{', '.join(sorted(net_s))}", "plugin hook scripts read secrets in one and use the network in another",
+                involved=sorted(sec_s | net_s))
+        if skill_text:
+            for no, line in enumerate(skill_text.splitlines(), 1):
+                m = PLUGIN_DEPENDENCY.search(line)
+                if m:
+                    add(LOW, "plugin-dependency", "SKILL.md", no, m.group(0),
+                        "relies on its plugin's MCP tools or hooks; it may not work if docked alone", context="skill_md")
+                    break
+
     findings.sort(key=lambda f: (SEVERITIES.index(f["severity"]), f["file"], f["line"]))
     all_findings.sort(key=lambda f: (SEVERITIES.index(f["severity"]), f["file"], f["line"]))
     counts = {s: sum(1 for f in findings if f["severity"] == s) for s in SEVERITIES}
@@ -613,7 +749,7 @@ def audit(root):
     truncated = sum(max(0, n - MAX_PER_RULE_PER_FILE) for n in counts_per_rule.values())
     return {"root": root, "name": meta.get("name", ""), "description": desc, "files": files, "scripts": scripts,
             "findings": findings, "all_findings": all_findings, "counts": counts, "verdict": VERDICTS[top],
-            "truncated": truncated,
+            "truncated": truncated, "plugin": plugin,
             "desc_tokens": tokens(meta.get("name", "") + desc), "body_tokens": body_tokens}
 
 
@@ -638,6 +774,7 @@ def report_json(report, version, skill_id=None, source=None, commit=None, tree_s
         "tokens": {"session": report["desc_tokens"], "on_use": report["body_tokens"]},
         "truncated": report["truncated"],
         "not_scanned": [],
+        "plugin": report.get("plugin"),
         "findings": [{
             "id": f["id"], "rule": f["rule"], "severity": f["severity"], "file": f["file"], "line": f["line"],
             "message": sanitize(f["note"], 400), "excerpt": f["excerpt"], "context": f["context"],
@@ -669,6 +806,11 @@ def render(report, title=None, accepted=None, verdict=None):
         lines.append(f"         {f['note']}  ┊ {f['excerpt']}")
     if report["truncated"]:
         lines.append(f"  (+{report['truncated']} repeated findings not shown)")
+    if report.get("plugin"):
+        pl = report["plugin"]
+        lines.append(f"  This skill ships inside plugin {sanitize(pl['name'], 80)} ({pl['hooks']} hook(s), "
+                     f"{pl['mcp_servers']} MCP server(s)). Docking the skill alone does not install the plugin's "
+                     "hooks or MCP servers; installing the plugin does.")
     if accepted:
         lines.append("  Accepted findings stop counting only while their id and every file they depend on are unchanged;"
                      " any change to such a file brings them back.")

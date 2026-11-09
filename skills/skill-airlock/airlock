@@ -154,6 +154,44 @@ def materialize(src):
     return mirror, git("rev-parse", "HEAD", cwd=mirror), git("log", "-1", "--format=%cs", cwd=mirror)
 
 
+def find_plugin_root(skill_dir, stop=None, levels=4):
+    """The nearest ancestor (not the skill dir itself) holding .claude-plugin/plugin.json, else None."""
+    d = Path(skill_dir).resolve()
+    stop = Path(stop).resolve() if stop else None
+    for _ in range(levels):
+        if stop and d == stop:
+            break
+        d = d.parent
+        if (d / ".claude-plugin" / "plugin.json").is_file():
+            return d
+        if stop and d == stop or d == d.parent:
+            break
+    return None
+
+
+def copy_plugin(src, dest):
+    """Copy what gives a plugin its authority (manifest, hooks, MCP config, the scripts hooks run) into
+    the quarantine, so it is audited and integrity-checked with the skill."""
+    src, dest = Path(src), Path(dest)
+    for rel in (".claude-plugin/plugin.json", ".mcp.json", "hooks.json"):
+        if (src / rel).is_file() and not (src / rel).is_symlink():
+            (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src / rel, dest / rel)
+    if (src / "hooks").is_dir() and not (src / "hooks").is_symlink():
+        shutil.copytree(src / "hooks", dest / "hooks", symlinks=True, dirs_exist_ok=True)
+    real = src.resolve()
+    for rel in _audit.plugin_config(str(src))["scripts"]:
+        f = src / rel
+        if f.is_file() and not f.is_symlink() and str(f.resolve()).startswith(str(real) + os.sep):
+            (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, dest / rel)
+
+
+def all_hashes(m):
+    """The skill's file hashes plus the plugin's, prefixed plugin/ (what acceptances are pinned to)."""
+    return {**m["files"], **{"plugin/" + k: v for k, v in (m.get("plugin_files") or {}).items()}}
+
+
 def scan_catalog(src, root, commit, date):
     entries, seen = [], set()
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
@@ -178,8 +216,10 @@ def scan_catalog(src, root, commit, date):
         flags = _audit.instruction_hits(raw_name + "\n" + desc)
         if not name_ok:
             flags.append("unsafe-name")
+        proot = find_plugin_root(dirpath, stop=root)
         entries.append({"id": sid, "source": src["id"], "trust": src.get("trust", "community"), "name": name,
                         "description": desc, "path": rel, "commit": commit, "date": date,
+                        "plugin_root": os.path.relpath(proot, root) if proot else None,
                         "has_scripts": has_scripts, "flags": flags,
                         "desc_tokens": _audit.tokens(name + meta.get("description", "")),
                         "body_tokens": _audit.tokens("\n".join(text.splitlines()[body_start:]))})
@@ -269,7 +309,7 @@ def resolve_catalog(ref):
     if (p / "SKILL.md").is_file() or (ref.startswith((".", "/", "~")) and p.is_dir()):
         p = p.resolve()
         return {"id": f"local/{qid(p.name)}", "source": "local", "trust": "local", "name": qid(p.name), "path": str(p),
-                "commit": "-", "root": p}
+                "commit": "-", "root": p, "plugin_abs": find_plugin_root(p)}
     idx = load_index()
     hits = [e for e in idx if e["id"] == ref] or [e for e in idx if e["name"] == ref]
     if not hits:
@@ -282,6 +322,7 @@ def resolve_catalog(ref):
         raise Fail(f"source '{e['source']}' is no longer in sources.json")
     base = Path(src["path"]).expanduser() if src.get("type") == "path" else STATE / "mirrors" / qid(src["id"])
     e["root"] = base / e["path"]
+    e["plugin_abs"] = (base / e["plugin_root"]) if e.get("plugin_root") else None
     if not (e["root"] / "SKILL.md").is_file():
         raise Fail(f"{e['id']} is missing from the mirror: run `airlock sync`")
     return e
@@ -305,7 +346,8 @@ def resolve_quarantine(ref):
     if len(hits) > 1:
         raise Fail(f"'{clean(ref, 80)}' is ambiguous: " + ", ".join(clean(m["id"], 120) for m in hits))
     m = hits[0]
-    if tree_hashes(m["qdir"] / "skill") != m["files"]:
+    if tree_hashes(m["qdir"] / "skill") != m["files"] or \
+            (m.get("plugin_files") is not None and tree_hashes(m["qdir"] / "plugin") != m["plugin_files"]):
         raise Fail(f"{clean(m['id'], 120)} changed in quarantine after it was inspected: run `airlock inspect` again")
     return m
 
@@ -364,7 +406,7 @@ def effective_verdict(m):
     if not data or data.get("tree_sha256") != _audit.tree_digest(m["files"]):
         return m["verdict"]
     data["verdict"] = data.get("static_verdict", data["verdict"])
-    return apply_accepted(data, m["id"], m["source"], m["files"])[0]["verdict"]
+    return apply_accepted(data, m["id"], m["source"], all_hashes(m))[0]["verdict"]
 
 
 def cmd_accept(args):
@@ -378,7 +420,7 @@ def cmd_accept(args):
 
     if args.list:
         mine = [a for a in store["accepted"] if a.get("skill_id") == m["id"] and a.get("source") == m["source"]]
-        _, live, _ = apply_accepted(json.loads(json.dumps(data)), m["id"], m["source"], m["files"])
+        _, live, _ = apply_accepted(json.loads(json.dumps(data)), m["id"], m["source"], all_hashes(m))
         if not mine:
             print(f"No accepted findings for {sid}.")
         for a in mine:
@@ -426,11 +468,11 @@ def cmd_accept(args):
             store["accepted"].append({
                 "skill_id": m["id"], "source": m["source"], "commit": m["commit"], "finding_id": i,
                 "rule": f["rule"], "file": f["file"],
-                "files_sha256": {p: m["files"][p] for p in f["files_involved"] if p in m["files"]},
+                "files_sha256": {p: all_hashes(m)[p] for p in f["files_involved"] if p in all_hashes(m)},
                 "reason": args.reason.strip(), "accepted_at": iso(now())})
         save_json(STATE / "accepted.json", store)
         log_decision("accept", m["id"], args.ids, args.reason.strip())
-    data, accepted, stale = apply_accepted(data, m["id"], m["source"], m["files"])
+    data, accepted, stale = apply_accepted(data, m["id"], m["source"], all_hashes(m))
     save_json(m["qdir"] / "audit.json", data)
     m["verdict"] = data["verdict"]
     save_json(m["qdir"] / "meta.json", {k: v for k, v in m.items() if k != "qdir"})
@@ -496,11 +538,11 @@ def cmd_review_check(args):
         sys.exit(1)
     data["findings"] = [f for f in data["findings"] if f["rule"] != "llm-review"]
     data["verdict"] = data.get("static_verdict", data["verdict"])
-    before = apply_accepted(json.loads(json.dumps(data)), m["id"], m["source"], m["files"])[0]["verdict"]
+    before = apply_accepted(json.loads(json.dumps(data)), m["id"], m["source"], all_hashes(m))[0]["verdict"]
     new = _review.raised_findings(norm, data, before)
     data["findings"] += new
     data["counts"] = {sev: sum(1 for f in data["findings"] if f["severity"] == sev) for sev in _audit.SEVERITIES}
-    data, _accepted, _ = apply_accepted(data, m["id"], m["source"], m["files"])
+    data, _accepted, _ = apply_accepted(data, m["id"], m["source"], all_hashes(m))
     data["review"] = {"status": "valid", "checked_at": iso(now()), "q1": norm["q1"], "q2": norm["q2"],
                       "raised": [f["id"] for f in new], "false_positive_claims": norm["q6"]}
     save_json(m["qdir"] / "audit.json", data)
@@ -541,14 +583,17 @@ def cmd_inspect(args):
     if qdir.exists():
         shutil.rmtree(qdir)
     shutil.copytree(e["root"], qdir / "skill", symlinks=True, ignore=shutil.ignore_patterns(".git"))
-    report = _audit.audit(qdir / "skill")
+    if e.get("plugin_abs"):
+        copy_plugin(e["plugin_abs"], qdir / "plugin")
+    report = _audit.audit(qdir / "skill", plugin_root=qdir / "plugin" if e.get("plugin_abs") else None)
     name = report["name"] or e["name"]
     meta = {"id": e["id"], "name": name, "source": e["source"], "trust": e["trust"], "commit": e["commit"],
             "origin": str(e["root"]), "inspected_at": iso(now()), "verdict": report["verdict"],
-            "counts": report["counts"], "files": tree_hashes(qdir / "skill"), "uses": []}
+            "counts": report["counts"], "files": tree_hashes(qdir / "skill"), "uses": [],
+            "plugin_files": tree_hashes(qdir / "plugin") if e.get("plugin_abs") else None}
     save_json(qdir / "meta.json", meta)
     data = audit_json(report, qdir / "skill", skill_id=e["id"], source=e["source"], commit=e["commit"])
-    data, accepted, stale = apply_accepted(data, e["id"], e["source"], meta["files"])
+    data, accepted, stale = apply_accepted(data, e["id"], e["source"], all_hashes(meta))
     meta["verdict"] = data["verdict"]
     save_json(qdir / "meta.json", meta)
     save_json(qdir / "audit.json", data)   # the last report, for `accept` and the decision log
@@ -589,6 +634,7 @@ def cmd_audit(args):
         p = Path(ref).expanduser()
         if p.is_dir():
             targets.append((ref, p))
+            meta[ref] = {"plugin_abs": find_plugin_root(p), "local": True}
         else:
             e = resolve_catalog(ref)
             targets.append((ref, e["root"]))
@@ -598,7 +644,7 @@ def cmd_audit(args):
     summary = []
     as_json = getattr(args, "json", False)
     for label, d in targets:
-        r = _audit.audit(d)
+        r = _audit.audit(d, plugin_root=(meta.get(label) or {}).get("plugin_abs"))
         summary.append((label, r))
         if not args.summary and not as_json:
             print(_audit.render(r, title=label) + "\n")
@@ -606,6 +652,7 @@ def cmd_audit(args):
         reports = []
         for (label, d), (_, r) in zip(targets, summary):
             e = meta.get(label)
+            e = None if not e or e.get("local") else e
             reports.append(audit_json(r, d, skill_id=e["id"] if e else None, source=e["source"] if e else "local",
                                       commit=e["commit"] if e else None) | {"label": label})
         print_json({"schema_version": _audit.SCHEMA_VERSION, "reports": reports})
