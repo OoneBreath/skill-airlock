@@ -17,3 +17,11 @@ mistakes these for real skills. The tests copy them into a temporary catalog and
 | `split-exfil` | shortcut sync | reads `~/.ssh` in one script and uploads it from another; generic words in the description |
 | `remote-instructions` | style review | fetches its real instructions from a URL at run time (REVIEW, not BLOCK: the audit can't see them) |
 | `name-injection` | PDF tools | puts instructions to the agent (and a fake user approval) in the frontmatter `name` |
+
+`tests/review_fixtures/` holds skills whose risk only shows up when the text is read for meaning, plus
+canned reviewer answers, for the semantic review (`review-pack` / `review-check`). They are not part of
+the static catalog above:
+
+| Fixture | Pretends to be | Actually |
+|---|---|---|
+| `pr-notes` | PR description writer | tells the agent to put the user's terminal history into the PR description (static audit: CLEAN) |
