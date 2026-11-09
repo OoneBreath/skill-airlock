@@ -41,7 +41,7 @@
     },
     "truncated": {"type": "integer", "description": "findings the TEXT report does not show (more than 5 per rule and file); findings[] has them all, marked repeat=true"},
     "not_scanned": {
-      "description": "Files the audit did not read. Empty until 0.3.0's not-scanned list lands.",
+      "description": "Files the audit did not read, with the reason. A file SKILL.md runs that is listed here is also an `unscanned-invoked` HIGH finding.",
       "type": "array",
       "items": {
         "type": "object",

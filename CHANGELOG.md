@@ -2,6 +2,20 @@
 
 ## 0.3.0 (unreleased)
 
+- **What the audit did not read is listed.** `not_scanned[]` in the JSON report holds each skipped file
+  with its reason (`binary`, `too-large`, `symlink-out`, `unreadable`) and size; the text report gets a
+  "Not scanned (N files)" line right after the verdict. A file SKILL.md tells the agent to run that the
+  audit could not read is `unscanned-invoked` (HIGH).
+- **Remote-package instructions in prose: `prose-remote-package`.** Covers `npx`, `bunx`, `uvx`,
+  `pnpm dlx`, `yarn dlx`, `pipx run`, `pip install`, `npm i -g`, `uv tool install`, `deno run <url>`.
+  - **Severity.** In SKILL.md: MEDIUM; HIGH with `-y`/`--yes` (no confirmation prompt); one level down
+    when the version is pinned or the description names the package. LOW in reference Markdown.
+  - **Left out on purpose.** A project's own `npm install` and negated mentions ("do not run
+    `pip install`") are not flagged.
+  - **Before.** 0.2.0 caught most of these only as LOW, and `pipx run`, `pnpm dlx` and `yarn dlx` not
+    at all.
+  - **Calibration.** 4 catalog skills went OK → REVIEW. The probes and the reasons, including why
+    `@latest` alone isn't HIGH, are in [docs/calibration.md](docs/calibration.md).
 - **Skills inside plugins.** A plugin's authority lives in its hooks and MCP servers, not in the skill's
   directory. The audit now reads them too.
   - **Detection and quarantine.** `sync` records `plugin_root` for a skill under a
